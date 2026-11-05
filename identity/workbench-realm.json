@@ -54,5 +54,15 @@
         }
       ]
     }
-  ]
+  ],
+  "resetPasswordAllowed": true,
+  "smtpServer": {
+    "host": "mailpit",
+    "port": "1025",
+    "from": "workbench@example.test",
+    "fromDisplayName": "Local Workbench",
+    "ssl": "false",
+    "starttls": "false",
+    "auth": "false"
+  }
 }

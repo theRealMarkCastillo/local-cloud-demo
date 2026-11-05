@@ -94,3 +94,12 @@ The synchronous demo Redis client is used in sync API routes; middleware offload
 it from the async event loop. OAuth callback access logs are disabled at nginx and uvicorn to avoid logging authorization codes. The worker
 uses a short DB transaction around S3 writes for clarity; do not extend this pattern
 to minutes-long collectors or non-idempotent external actions.
+
+## Email capture and recovery
+
+Mailpit is local-only infrastructure. Its inbox is loopback-bound and holds account
+verification/recovery links; never tunnel it. SMTP is available only on the Compose
+network and is unauthenticated locally. Keycloak owns account tokens/expiry; the
+application transport does not implement a separate identity flow. Existing local
+users remain intact when SMTP settings are reapplied. Cloud app SMTP requires TLS;
+credentials stay server-side. See [EMAIL.md](EMAIL.md) for policy and operational limits.

@@ -45,6 +45,9 @@ lists are scoped to the OIDC issuer + subject of the signed-in user.
 
 ```sh
 make smoke                       # Real OIDC login + full background job path
+make email-config                # Reapply local Keycloak/Mailpit settings
+make email-test                  # Send a synthetic message to local Mailpit
+make email-smoke                 # Verify account email/reset flow with a synthetic user
 make logs                        # Follow stack logs
 make dev                         # API hot reload; frontend files mounted
 make down                        # Stop containers; retain volumes
@@ -70,6 +73,9 @@ flowchart LR
   Worker --> S3[(MinIO / S3: private reports)]
   API --> S3
   KC --> KPG[(Separate identity Postgres)]
+  KC --> Mailpit[Mailpit: local email capture]
+  API --> Mailpit
+  Worker --> Mailpit
 ```
 
 | Service | Responsibility | Cloud equivalent |
@@ -82,7 +88,10 @@ flowchart LR
 | minio | Local S3-compatible private bucket | Private S3-compatible bucket |
 | keycloak | Local OIDC identity provider | Hosted Keycloak or another OIDC provider |
 | keycloak-db | Identity data, isolated from app DB | Managed by your chosen identity deployment |
+| mailpit | Captured identity/application emails; inbox localhost:18026 | Real SMTP provider/sandbox; configure hosted IdP separately |
 | init | Versioned app schema + local private bucket | Release migration; pre-created cloud bucket |
+
+Email setup, account recovery and SMTP deployment settings: [EMAIL.md](docs/EMAIL.md).
 
 Redis is not the durable job queue: losing a notification does not lose a job.
 Workers poll Postgres and claim rows with `FOR UPDATE SKIP LOCKED`. A short job

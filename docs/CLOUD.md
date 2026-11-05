@@ -109,3 +109,12 @@ Provider references:
 - https://neon.com/docs/connect/connect-from-any-app
 - https://www.keycloak.org/server/hostname
 - https://www.keycloak.org/server/reverseproxy
+
+## Email delivery
+
+Local Mailpit is not deployed by the cloud manifests. Application email is optional;
+set SMTP_HOST/PORT/SECURITY/FROM and, when needed, SMTP_USERNAME/PASSWORD through the
+platform's runtime environment/secrets. Configure hosted Keycloak/other IdP SMTP
+separately. Use verified sender domains, TLS and a provider sandbox for development.
+The synchronous transport does not provide durable retries/outbox or deduplication.
+See [EMAIL.md](EMAIL.md). No cloud email delivery has been validated.

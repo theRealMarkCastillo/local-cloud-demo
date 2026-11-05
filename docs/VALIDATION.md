@@ -76,3 +76,33 @@ external registrations, internal endpoints, cloud differences and imported-app l
 project port, a custom port and invalid-port refusal without launching ngrok. No
 running origin, external registration or cloud deployment was changed. Public-tunnel
 and social-provider runtime validation remain pending.
+
+## Mailpit and SMTP — 2026-11-05
+
+- Added pinned Mailpit v1.32.0 with an internal-only SMTP listener, loopback inbox
+  on port 18026 by default, health check and project-scoped persistent message volume.
+- `make check up email-test` passed on the existing local stack. The local realm's
+  SMTP/recovery configuration was updated without resetting users; the existing
+  ngrok origin was preserved. The synthetic application message was present in the
+  Mailpit inbox. No real external email was delivered.
+- A disposable localhost stack passed `make check test smoke email-smoke`:
+  **11 tests** (7 session/concurrency plus 4 SMTP/TLS/recipient regressions), real
+  OIDC/CSRF/job/worker/private-report/two-user/logout smoke, Keycloak verification
+  email and completed verification, forgot-password email/reset, fresh OIDC login
+  with the new password, and application SMTP capture. The synthetic user, test
+  stack and volumes were removed. Existing project data was not reset.
+- The email smoke matches browser localhost Secure-cookie behavior, follows the
+  explicit cross-browser email confirmation and resolves relative recovery links.
+  This does not weaken application cookies or production TLS configuration.
+- Backend/script Python syntax, documentation link targets and diff checks passed.
+  Real SMTP provider delivery, cloud runtime and ngrok email-return flows remain
+  pending. See [EMAIL.md](EMAIL.md) for local commands, verification policy and the
+  separate application/hosted-identity SMTP configuration.
+
+These Mailpit changes are recorded in the source accompanying this report.
+No cloud deployment or new public tunnel was performed.
+
+The email guide and README also document the three shared `email-*` command names
+across all scaffolds. Supabase implementations use native Auth confirmation/recovery
+APIs; command consistency does not imply identical configuration variables, a bundled
+application notification transport or a password-reset UI in those demos.

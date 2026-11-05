@@ -35,3 +35,18 @@ if ENVIRONMENT != "local":
         raise RuntimeError("Cloud REDIS_URL must use rediss://")
     if "local-only" in OIDC_CLIENT_SECRET or S3_ACCESS_KEY == "localminio":
         raise RuntimeError("Replace local demo credentials before deploying")
+
+# Empty host disables app email outside local Compose. Cloud credentials stay server-side.
+SMTP_HOST = os.getenv("SMTP_HOST", "")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+SMTP_SECURITY = os.getenv("SMTP_SECURITY", "starttls")
+SMTP_USERNAME = os.getenv("SMTP_USERNAME", "")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
+SMTP_FROM = os.getenv("SMTP_FROM", "workbench@example.test")
+if SMTP_HOST:
+    if not 1 <= SMTP_PORT <= 65535 or SMTP_SECURITY not in ("none", "starttls", "tls"):
+        raise RuntimeError("Invalid SMTP port/security configuration")
+    if bool(SMTP_USERNAME) != bool(SMTP_PASSWORD):
+        raise RuntimeError("SMTP username/password must be configured together")
+    if ENVIRONMENT != "local" and SMTP_SECURITY == "none":
+        raise RuntimeError("Cloud SMTP must use starttls or tls")

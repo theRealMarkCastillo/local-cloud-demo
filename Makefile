@@ -1,8 +1,10 @@
 .PHONY: dev up down logs check smoke tunnel tunnel-set
 up:
 	docker compose up --build -d --wait
+	python3 scripts/configure_email.py
 dev:
 	docker compose -f compose.yaml -f compose.dev.yaml up --build -d --wait
+	python3 scripts/configure_email.py
 down:
 	docker compose down
 logs:
@@ -19,3 +21,13 @@ tunnel-set:
 .PHONY: test
 test:
 	docker compose run --rm --no-deps -T -v "$(CURDIR)/backend/app:/srv/app:ro" -v "$(CURDIR)/backend/tests:/srv/tests:ro" api python -m unittest discover -s /srv/tests -v
+
+.PHONY: email-config email-test
+email-config:
+	python3 scripts/configure_email.py
+email-test:
+	docker compose exec -T api python -m app.email
+
+.PHONY: email-smoke
+email-smoke:
+	python3 scripts/smoke_email.py

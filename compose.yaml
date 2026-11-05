@@ -13,6 +13,12 @@ x-app: &app
     S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-local-minio-password}
     S3_BUCKET: reports
     S3_REGION: us-east-1
+    SMTP_HOST: ${SMTP_HOST:-mailpit}
+    SMTP_PORT: ${SMTP_PORT:-1025}
+    SMTP_SECURITY: ${SMTP_SECURITY:-none}
+    SMTP_USERNAME: ${SMTP_USERNAME:-}
+    SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+    SMTP_FROM: ${SMTP_FROM:-workbench@example.test}
   init: true
   restart: unless-stopped
   stop_grace_period: 30s
@@ -98,6 +104,20 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-localminio}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-local-minio-password}
     volumes: ['minio-data:/data']
+  mailpit:
+    image: axllent/mailpit:v1.32.0
+    environment:
+      MP_DATABASE: /data/mailpit.db
+      MP_MAX_MESSAGES: '500'
+    ports:
+      - '127.0.0.1:${MAIL_PORT:-18026}:8025'
+    volumes: ['mailpit-data:/data']
+    healthcheck:
+      test: ['CMD', '/mailpit', 'readyz']
+      interval: 3s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
   keycloak-db:
     image: postgres:17-alpine
     environment:
@@ -131,6 +151,8 @@ services:
     depends_on:
       keycloak-db:
         condition: service_healthy
+      mailpit:
+        condition: service_healthy
     healthcheck:
       test: ['CMD', 'bash', '-ec', 'exec 3<>/dev/tcp/127.0.0.1/9000; printf "GET /identity/health/ready HTTP/1.0\r\n\r\n" >&3; cat <&3 | grep -q "200 OK"']
       interval: 5s
@@ -142,3 +164,4 @@ volumes:
   redis-data:
   minio-data:
   keycloak-db-data:
+  mailpit-data:

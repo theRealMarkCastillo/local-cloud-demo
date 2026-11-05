@@ -87,6 +87,7 @@ login after changing origin, and update external provider registrations as neede
 Only the web entry point is forwarded; keep database, raw gateway/Studio, storage
 admin and Mailpit off the tunnel. For emailed links, local Mailpit is developer-only;
 configure real SMTP or deliberately deliver the captured test link to the tester.
+Local Keycloak and application email use [Mailpit](EMAIL.md); its inbox stays private.
 
 Stop ngrok with Ctrl-C. Restore the localhost configuration separately:
 
