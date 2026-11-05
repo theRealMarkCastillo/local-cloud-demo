@@ -1,0 +1,7 @@
+# Optional hot reload. Cloud builds still package the source into the image.
+services:
+  api:
+    volumes: ['./backend/app:/srv/app:ro']
+    command: ['uvicorn', 'app.main:app', '--host', '0.0.0.0', '--port', '8000', '--reload', '--no-proxy-headers', '--no-access-log']
+  web:
+    volumes: ['./web/public:/usr/share/nginx/html:ro']

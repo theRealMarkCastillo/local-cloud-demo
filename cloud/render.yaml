@@ -1,0 +1,77 @@
+# Optional paid deployment. Replace names; configure a shared secret env group first.
+# PUBLIC_URL must be the WEB service URL, including for the API and worker.
+envVarGroups:
+  - name: workbench-secrets
+    envVars:
+      - key: ENVIRONMENT
+        value: cloud
+      - key: PUBLIC_URL
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: S3_ENDPOINT
+        sync: false
+      - key: S3_ACCESS_KEY
+        sync: false
+      - key: S3_SECRET_KEY
+        sync: false
+      - key: S3_BUCKET
+        sync: false
+      - key: S3_REGION
+        value: us-east-1
+  - name: workbench-identity
+    envVars:
+      - key: OIDC_ISSUER_URL
+        sync: false
+      - key: OIDC_CLIENT_ID
+        sync: false
+      - key: OIDC_CLIENT_SECRET
+        sync: false
+services:
+  - type: web
+    name: workbench-web
+    runtime: docker
+    plan: 0.5c-512mb
+    region: virginia
+    dockerfilePath: ./web/Dockerfile
+    dockerContext: .
+    autoDeployTrigger: "off"
+    healthCheckPath: /health
+    envVars:
+      - key: API_UPSTREAM
+        fromService:
+          name: workbench-api
+          type: pserv
+          property: hostport
+      - key: IDENTITY_UPSTREAM
+        fromService:
+          name: workbench-api
+          type: pserv
+          property: hostport
+  - type: pserv
+    name: workbench-api
+    runtime: docker
+    plan: 0.5c-512mb
+    region: virginia
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: .
+    autoDeployTrigger: "off"
+    preDeployCommand: python -m app.migrate
+    envVars:
+      - fromGroup: workbench-secrets
+      - fromGroup: workbench-identity
+      - key: PORT
+        value: '8000'
+  - type: worker
+    name: workbench-worker
+    runtime: docker
+    plan: 0.5c-512mb
+    region: virginia
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: .
+    autoDeployTrigger: "off"
+    dockerCommand: python -m app.worker
+    envVars:
+      - fromGroup: workbench-secrets

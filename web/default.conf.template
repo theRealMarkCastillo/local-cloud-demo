@@ -1,0 +1,30 @@
+server {
+    listen ${PORT};
+    server_tokens off;
+    resolver ${DNS_RESOLVER} valid=5s;
+    set $api_upstream "${API_UPSTREAM}";
+    set $identity_upstream "${IDENTITY_UPSTREAM}";
+    # Avoid logging OAuth authorization codes or state in callback query strings.
+    access_log off;
+    client_max_body_size 32k;
+    add_header X-Content-Type-Options nosniff always;
+    add_header Referrer-Policy same-origin always;
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'" always;
+    location / { root /usr/share/nginx/html; try_files $uri $uri/ =404; }
+    location ~ ^/(api|auth)(/|$) {
+        proxy_pass http://$api_upstream;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-For $remote_addr;
+    }
+    # Local Keycloak only. Block its admin UI/API through the public demo entry point.
+    location ~ ^/identity/(realms|resources)/ {
+        proxy_pass http://$identity_upstream;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Host $http_host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-For $remote_addr;
+    }
+    location /identity/ { return 404; }
+    location = /health { proxy_pass http://$api_upstream/health; }
+}

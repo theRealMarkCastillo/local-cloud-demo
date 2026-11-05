@@ -1,0 +1,7 @@
+#!/bin/sh
+# nginx sources *.envsh before rendering its templates. Respect a provider override.
+if [ -z "${DNS_RESOLVER:-}" ]; then
+    DNS_RESOLVER=$(awk '/^nameserver / {print $2; exit}' /etc/resolv.conf)
+    case "$DNS_RESOLVER" in *:*) DNS_RESOLVER="[$DNS_RESOLVER]" ;; esac
+    export DNS_RESOLVER
+fi

@@ -1,0 +1,9 @@
+primary_region = "iad"
+kill_timeout = "30s"
+[build]
+  dockerfile = "backend/Dockerfile"
+[processes]
+  worker = "python -m app.worker"
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

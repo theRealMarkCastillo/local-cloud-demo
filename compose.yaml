@@ -1,0 +1,144 @@
+name: local-cloud-demo
+x-app: &app
+  build:
+    context: .
+    dockerfile: backend/Dockerfile
+  environment: &app-env
+    ENVIRONMENT: local
+    PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8080}
+    DATABASE_URL: postgresql://app:${POSTGRES_PASSWORD:-local-postgres-password}@postgres:5432/workbench
+    REDIS_URL: redis://redis:6379/0
+    S3_ENDPOINT: http://minio:9000
+    S3_ACCESS_KEY: ${MINIO_ROOT_USER:-localminio}
+    S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-local-minio-password}
+    S3_BUCKET: reports
+    S3_REGION: us-east-1
+  init: true
+  restart: unless-stopped
+  stop_grace_period: 30s
+services:
+  web:
+    build:
+      context: .
+      dockerfile: web/Dockerfile
+    environment:
+      PORT: '8080'
+      API_UPSTREAM: api:8000
+      IDENTITY_UPSTREAM: keycloak:8080
+    ports:
+      - '127.0.0.1:${WEB_PORT:-8080}:8080'
+    depends_on:
+      api:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+    restart: unless-stopped
+  api:
+    <<: *app
+    environment:
+      <<: *app-env
+      OIDC_ISSUER_URL: ${PUBLIC_URL:-http://localhost:8080}/identity/realms/workbench
+      OIDC_INTERNAL_URL: http://keycloak:8080/identity/realms/workbench
+      OIDC_CLIENT_ID: workbench
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-local-only-oidc-secret}
+    depends_on:
+      init:
+        condition: service_completed_successfully
+      keycloak:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'python', '-c', 'import urllib.request; urllib.request.urlopen("http://localhost:8000/health", timeout=5)']
+      interval: 10s
+      timeout: 8s
+      retries: 12
+  worker:
+    <<: *app
+    command: ['python', '-m', 'app.worker']
+    depends_on:
+      init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+  init:
+    <<: *app
+    command: ['python', '-m', 'app.bootstrap']
+    restart: 'no'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_started
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local-postgres-password}
+      POSTGRES_DB: workbench
+    volumes: ['postgres-data:/var/lib/postgresql/data']
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U app -d workbench']
+      interval: 3s
+      timeout: 3s
+      retries: 30
+  redis:
+    image: redis:7.4-alpine
+    command: ['redis-server', '--appendonly', 'yes', '--maxmemory', '128mb', '--maxmemory-policy', 'noeviction']
+    volumes: ['redis-data:/data']
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 3s
+      timeout: 3s
+      retries: 30
+  minio:
+    image: cgr.dev/chainguard/minio@sha256:cee9a8e35885e93f14b3cb32960e5017aff74e2adfb52ba87c65003b0163886b
+    command: ['server', '/data', '--console-address', ':9001']
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-localminio}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-local-minio-password}
+    volumes: ['minio-data:/data']
+  keycloak-db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD: ${KEYCLOAK_DB_PASSWORD:-local-keycloak-db-password}
+      POSTGRES_DB: keycloak
+    volumes: ['keycloak-db-data:/var/lib/postgresql/data']
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U keycloak -d keycloak']
+      interval: 3s
+      timeout: 3s
+      retries: 30
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.8.1
+    command: ['start-dev', '--import-realm']
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://keycloak-db:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:-local-keycloak-db-password}
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-local-admin-password}
+      KC_HTTP_RELATIVE_PATH: /identity
+      KC_HOSTNAME: ${PUBLIC_URL:-http://localhost:8080}/identity
+      KC_PROXY_HEADERS: xforwarded
+      KC_HEALTH_ENABLED: 'true'
+      PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8080}
+      DEMO_PASSWORD: ${DEMO_PASSWORD:-demo-password}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-local-only-oidc-secret}
+    volumes: ['./identity/workbench-realm.json:/opt/keycloak/data/import/workbench-realm.json:ro']
+    depends_on:
+      keycloak-db:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'bash', '-ec', 'exec 3<>/dev/tcp/127.0.0.1/9000; printf "GET /identity/health/ready HTTP/1.0\r\n\r\n" >&3; cat <&3 | grep -q "200 OK"']
+      interval: 5s
+      timeout: 5s
+      start_period: 30s
+      retries: 40
+volumes:
+  postgres-data:
+  redis-data:
+  minio-data:
+  keycloak-db-data:
