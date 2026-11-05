@@ -12,6 +12,10 @@ check:
 smoke:
 	python3 scripts/smoke.py
 tunnel:
-	ngrok http 8080
+	python3 scripts/tunnel.py
 tunnel-set:
 	python3 scripts/set_public_url.py "$(URL)"
+
+.PHONY: test
+test:
+	docker compose run --rm --no-deps -T -v "$(CURDIR)/backend/app:/srv/app:ro" -v "$(CURDIR)/backend/tests:/srv/tests:ro" api python -m unittest discover -s /srv/tests -v

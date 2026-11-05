@@ -27,8 +27,10 @@ DNS records were provisioned. No cloud deployment or runtime validation occurred
 A real HTTPS tunnel, cloud OIDC provider, Neon TLS connection, external Redis, and
 cloud S3 provider still need environment-specific validation before use.
 
-The local stack is left running at http://localhost:8080 with synthetic demo jobs.
-The folder is a new Git repository on main; no commit, remote, or push was created.
+The initial validation used http://localhost:8080 with synthetic demo jobs.
+The later OrbStack section records the explicitly selected HTTPS origin. The source
+is now published in the private [GitHub repository](https://github.com/theRealMarkCastillo/local-cloud-demo);
+its reviewed main commit is 36f650d. Subsequent review fixes and documentation are recorded alongside this report.
 
 ## Documentation follow-up — 2026-11-05
 
@@ -48,3 +50,29 @@ before creating OIDC state, and the frontend identifies an alternate origin.
 Browser sign-in, job completion and logout passed at the exact OrbStack URL.
 The smoke script now reads PUBLIC_URL and verifies OrbStack TLS using its existing
 public CA certificate, rather than disabling certificate validation.
+
+## Review fixes — 2026-11-05
+
+The session revocation finding is fixed locally. See [REVIEW.md](REVIEW.md) for the
+implementation plan, concurrency cases and precise runtime scope. Seven deterministic
+Redis/ASGI tests pass via `make test`; image rebuild and Compose validation pass.
+Real OIDC/CSRF/worker/private-report/two-user/logout smoke passed in a disposable
+localhost stack, which was removed with its volumes. The existing ngrok origin and
+application data were preserved. Its direct smoke is not counted as passing because
+the helper refuses nonlocal targets and alternate hosts have incompatible cookies.
+
+Application code, tests and documentation include the review fixes described above.
+No cloud deployment or production data change occurred. The browser cookie
+now has browser-session lifetime while Redis enforces the one-hour sliding idle
+expiry; sessions in the previous Redis format require fresh sign-in. Cloud runtime
+and provider integration limits above still apply.
+
+## URL and callback follow-up — 2026-11-05
+
+Added the cross-environment [URL/callback contract](URLS_AND_CALLBACKS.md), including
+external registrations, internal endpoints, cloud differences and imported-app limits.
+`make tunnel` now reads the configured local web port; the Supabase repos also provide
+`make tunnel-set` as an alias for their origin action. Dry-run checks covered the
+project port, a custom port and invalid-port refusal without launching ngrok. No
+running origin, external registration or cloud deployment was changed. Public-tunnel
+and social-provider runtime validation remain pending.

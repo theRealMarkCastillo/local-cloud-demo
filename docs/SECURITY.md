@@ -33,11 +33,21 @@ issuer continuity and the provider integration test matrix.
 - Browser gets an opaque HttpOnly, SameSite=Lax cookie. Cloud cookies are Secure
   and use the `__Host-` prefix. Tokens are not stored in localStorage or frontend code.
 - OIDC state and app sessions live in Redis; session IDs rotate after login.
-- Redis entries expire after one hour of inactivity. Redis loss signs users out.
+- Cookies last for the browser session; Redis enforces a one-hour sliding idle
+  timeout. Read-only responses refresh Redis TTL without rewriting state or cookies.
+  Browser session restoration can retain session cookies; Redis expiry still applies.
+  Redis loss signs users out. Old-format sessions from before this change require
+  fresh sign-in rather than being adopted into the new session-family format.
+- Atomic Lua scripts bind session IDs to a revocable family. Updates use snapshot
+  compare-and-set; rotation cannot escape an overlapping family logout. Use a
+  Redis endpoint supporting EVAL and multi-key atomic scripts; this implementation
+  is validated on standalone Redis, not Redis Cluster or a restricted HTTP API.
 - The API checks exact Origin and a session CSRF token for state-changing routes.
 - Each job query and report download is scoped to the authenticated owner.
-- Downloads stream through the API; the bucket is private and S3 keys stay server-side.
-- App logout destroys its Redis session. It **does not** end the provider's SSO
+- Small reports are buffered in memory and returned through the API; the bucket is private and S3 keys stay server-side.
+- App logout atomically revokes the session family; delayed reads, writes and
+  rotations cannot recreate it. See [review fixes and concurrency checks](REVIEW.md).
+  It **does not** end the provider's SSO
   session. A subsequent sign-in may be automatic. Add provider-supported RP-initiated
   logout and account revocation handling if the product needs them.
 

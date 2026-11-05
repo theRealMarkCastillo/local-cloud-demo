@@ -5,6 +5,24 @@ share it through a tunnel, or deploy the same application Dockerfiles to Fly or
 Render with Neon and external data services. This is separate from Eidolon and
 its repository policies. No cloud resources are provisioned by `make up`.
 
+
+## Choose the matching scaffold
+
+| Starting point | Repository |
+| --- | --- |
+| New app using Supabase Auth, RLS, Storage, Realtime and Functions | [supabase-local-cloud-scaffold](https://github.com/theRealMarkCastillo/supabase-local-cloud-scaffold) |
+| Existing exported app whose Supabase interfaces should be retained | [lovable-local-scaffold](https://github.com/theRealMarkCastillo/lovable-local-scaffold) |
+| Custom API, OIDC sessions and independently selected data/worker/storage services | [local-cloud-demo](https://github.com/theRealMarkCastillo/local-cloud-demo) |
+
+A worker can also be added to the Supabase starter; it does not automatically require
+Redis. The main choice is Supabase's backend API contract versus your own API contract.
+Repository links are private and require account access.
+
+Review fixes, checks and scope: [review record](docs/REVIEW.md).
+
+Public/internal URL configuration, tunnels and cloud callback registrations:
+[URLs and callbacks](docs/URLS_AND_CALLBACKS.md).
+
 ## Try it
 
 Requirements: Docker with Compose v2, `make`, and Python 3 for optional scripts.
