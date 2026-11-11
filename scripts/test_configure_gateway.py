@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 import configure_gateway
 
-SECRETS = {"gateway": "g", "credentials": "c", "workbench_agent": "w", "broker": "b"}
+SECRETS = {"gateway": "g", "credentials": "c", "workbench_agent": "w", "broker": "b", "reporter": "r"}
 PUBLIC = "https://demo.example"
 
 
@@ -51,7 +51,7 @@ class DesiredTests(unittest.TestCase):
         state = desired()
         holders = sorted(c["clientId"] for c in state["clients"] for m in c.get("protocolMappers", [])
                          if m["config"].get("included.custom.audience") == PUBLIC + "/gateway")
-        self.assertEqual(holders, ["agent-cli", "agent-cli-writer", "workbench-agent"])
+        self.assertEqual(holders, ["agent-cli", "agent-cli-writer", "reporter-agent", "workbench-agent"])
 
     def test_workbench_client_adds_workbench_agent_audience(self):
         audiences = {m["config"].get("included.client.audience") for m in client(desired(), "workbench")["protocolMappers"]}
@@ -63,9 +63,31 @@ class DesiredTests(unittest.TestCase):
 
     def test_agent_scope_mappings_match_spec(self):
         mappings = {k: set(v) for k, v in desired()["scope_mappings"].items()}
-        self.assertEqual(mappings["agent-cli"], {"llm:use", "workbench:read", "jira:use", "echo:use"})
+        self.assertEqual(mappings["agent-cli"], {"llm:use", "workbench:read", "jira:use", "echo:use", "reporter:use"})
         self.assertEqual(mappings["agent-cli-writer"], {"workbench:read", "workbench:write"})
-        self.assertEqual(mappings["workbench-agent"], {"llm:use", "workbench:read", "jira:use"})
+        self.assertEqual(mappings["workbench-agent"], {"llm:use", "workbench:read", "jira:use", "reporter:use"})
+
+    def test_reporter_agent_is_confidential_without_full_scope(self):
+        reporter = client(desired(), "reporter-agent")
+        for key in ("publicClient", "fullScopeAllowed", "serviceAccountsEnabled", "standardFlowEnabled"):
+            self.assertIs(reporter[key], False, key)
+        self.assertEqual(reporter["attributes"]["standard.token.exchange.enabled"], "true")
+
+    def test_reporter_agent_maps_only_workbench_read(self):
+        # The reporter's own mapping is the cap on what it can do for a user.
+        self.assertEqual(desired()["scope_mappings"]["reporter-agent"], ["workbench:read"])
+
+    def test_reporter_use_is_mapped_to_callers_only(self):
+        mappings = desired()["scope_mappings"]
+        self.assertEqual(sorted(name for name, roles in mappings.items() if "reporter:use" in roles),
+                         ["agent-cli", "workbench-agent"])
+
+    def test_users_group_grants_reporter_use(self):
+        self.assertIn("reporter:use", desired()["groups"]["gateway-users"])
+
+    def test_reporter_scope_adds_reporter_audience(self):
+        self.assertEqual(desired()["client_scopes"]["agent:reporter"],
+                         {"audience": "reporter-agent", "optional_on": ["gateway"]})
 
     def test_groups_split_jira(self):
         groups = desired()["groups"]

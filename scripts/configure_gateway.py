@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 REALM = "workbench"
 UPSTREAM = "upstream-demo"
 INTERNAL = "http://localhost:8080/identity/realms/" + UPSTREAM + "/protocol/openid-connect"
-ROLES = ["llm:use", "workbench:read", "workbench:write", "jira:use", "echo:use"]
+ROLES = ["llm:use", "workbench:read", "workbench:write", "jira:use", "echo:use", "reporter:use"]
 LOOPBACK = ["http://127.0.0.1/*", "http://localhost/*"]
 ACCOUNT_ROLES = ["account/manage-account", "account/manage-account-links", "account/view-profile"]
 
@@ -31,7 +31,8 @@ def secrets():
     return {"gateway": env("GATEWAY_CLIENT_SECRET", "local-only-gateway-secret"),
             "credentials": env("CREDENTIALS_CLIENT_SECRET", "local-only-credentials-secret"),
             "workbench_agent": env("WORKBENCH_AGENT_SECRET", "local-only-agent-secret"),
-            "broker": env("UPSTREAM_BROKER_SECRET", "local-only-broker-secret")}
+            "broker": env("UPSTREAM_BROKER_SECRET", "local-only-broker-secret"),
+            "reporter": env("REPORTER_AGENT_SECRET", "local-only-reporter-secret")}
 
 
 def audience(name, client_id):
@@ -70,6 +71,8 @@ def desired(public, secret):
         confidential("gateway-credentials", secret["credentials"], name="Gateway credentials service"),
         confidential("workbench-agent", secret["workbench_agent"], name="Workbench in-stack agent",
                      protocolMappers=agent_mappers(public)),
+        # A second agent, reached agent-to-agent through the gateway; it exchanges tokens like workbench-agent.
+        confidential("reporter-agent", secret["reporter"], name="Reporter agent", protocolMappers=agent_mappers(public)),
         public_agent("agent-cli", "Sample external agent", public),
         public_agent("agent-cli-writer", "Sample external agent that may write", public),
         {"clientId": "workbench", "fullScopeAllowed": False,
@@ -81,14 +84,16 @@ def desired(public, secret):
         {"clientId": "security-admin-console", "fullScopeAllowed": False},
     ]
     scope_mappings = {
-        "agent-cli": ["llm:use", "workbench:read", "jira:use", "echo:use"],
+        "agent-cli": ["llm:use", "workbench:read", "jira:use", "echo:use", "reporter:use"],
         "agent-cli-writer": ["workbench:read", "workbench:write"],
-        "workbench-agent": ["llm:use", "workbench:read", "jira:use"],
+        "workbench-agent": ["llm:use", "workbench:read", "jira:use", "reporter:use"],
+        # The reporter's own mapping is the cap on what it can do for a user: read, never write.
+        "reporter-agent": ["workbench:read"],
         "gateway-credentials": ["broker/read-token"],
         # Session tokens may call the account API (list/unlink connections) but never read stored tokens.
         "workbench": list(ACCOUNT_ROLES),
     }
-    groups = {"gateway-users": ["llm:use", "workbench:read", "workbench:write", "echo:use", "broker/read-token",
+    groups = {"gateway-users": ["llm:use", "workbench:read", "workbench:write", "echo:use", "reporter:use", "broker/read-token",
                                 *ACCOUNT_ROLES],
               "gateway-jira": ["jira:use"]}
     idp = {"alias": UPSTREAM, "displayName": "Upstream demo", "providerId": "oidc", "enabled": True,
@@ -100,7 +105,10 @@ def desired(public, secret):
                       "clientSecret": secret["broker"], "clientAuthMethod": "client_secret_post",
                       "defaultScope": "openid jira.read", "syncMode": "IMPORT",
                       "pkceEnabled": "true", "pkceMethod": "S256"}}
-    return {"clients": clients, "roles": list(ROLES), "groups": groups, "scope_mappings": scope_mappings, "idp": idp}
+    # The gateway requests this scope when it exchanges a token for the reporter, as it does mcp:tools for MCP.
+    client_scopes = {"agent:reporter": {"audience": "reporter-agent", "optional_on": ["gateway"]}}
+    return {"clients": clients, "roles": list(ROLES), "groups": groups, "scope_mappings": scope_mappings, "idp": idp,
+            "client_scopes": client_scopes}
 
 
 def main():
@@ -148,6 +156,18 @@ def main():
             if "mcp:tools" not in optional:
                 run("update", f"clients/{ids['gateway']}/optional-client-scopes/{scopes[0]['id']}", "-r", REALM, "-b", "{}")
                 created.append("gateway optional scope")
+        for name, spec in state["client_scopes"].items():
+            found = [s for s in get("client-scopes", "--fields", "id,name") if s["name"] == name]
+            if found:
+                scope_id = found[0]["id"]
+            else:
+                scope_id = put("create", "client-scopes", {
+                    "name": name, "protocol": "openid-connect", "attributes": {"include.in.token.scope": "true"},
+                    "protocolMappers": [audience(name + "-audience", spec["audience"])]}, "-i")
+                created.append("scope " + name)
+            for target in spec["optional_on"]:
+                if name not in {s["name"] for s in get(f"clients/{ids[target]}/optional-client-scopes")}:
+                    run("update", f"clients/{ids[target]}/optional-client-scopes/{scope_id}", "-r", REALM, "-b", "{}")
         have_roles = {r["name"] for r in get(f"clients/{ids['gateway']}/roles")}
         for role in state["roles"]:
             if role not in have_roles:
