@@ -167,7 +167,64 @@ Not tested against real accounts.
 - Services that only take per-user API keys need a real secret store. Keycloak is
   not one.
 
-## Proven in a spike, not built: per-user GCP access
+## Per-user GCP access: proven in a spike, not built
+
+**Status.** The mechanism below was run once against real Google Cloud in a
+throwaway project during development. Nothing for it is in this repository: no
+config, no Terraform, no gateway route, no smoke check. It is not part of
+`make up` or `make smoke`, and the local stack cannot run it (see
+[Why the local stack cannot run it](#why-the-local-stack-cannot-run-it)).
+
+### What was proven
+
+Against real Google Cloud (Workload Identity Federation, Google STS and IAM):
+
+1. A Keycloak user token whose audience is the pool provider's resource name
+   exchanges at Google STS for a federated access token (HTTP 200).
+2. The federated token carries the user's identity as
+   `principal://…/subject/<sub>`, so IAM can treat two users differently:
+   - a user granted a role on the project could read it (200);
+   - a user with no grant still got a federated token from STS (200), but the
+     read was refused (403 `PERMISSION_DENIED`).
+3. STS verifies the token's signature: a token with a tampered signature was
+   refused (400 `invalid_grant`, "Unable to verify the ID Token signature").
+
+So per-user authorization on GCP works with the identity Keycloak issues. The
+agent never holds a long-lived GCP credential, and the grant is per user.
+
+### How it was proven
+
+- A temporary GCP project, with a Workload Identity pool and an OIDC provider
+  pointing at a separate spike Keycloak realm (`spike-gcp`), with one agent
+  client (`spike-gcp-agent`) and two users, alice and bob.
+- GCP rejected an `http` issuer ("The scheme must be https"), so the provider
+  used a fake `https` issuer name and the realm's signing keys were uploaded to
+  the provider as a JWKS (signing keys only).
+- Alice's `principal://…/subject/<sub>` was granted a role that allows reading
+  the project. Bob had no grant.
+- A throwaway script obtained a token for each user with the pool provider as
+  audience, exchanged it at `https://sts.googleapis.com/v1/token`
+  (`subject_token_type=urn:ietf:params:oauth:token-type:jwt`), then called the
+  project read API with the federated token. A third request used a token with
+  a corrupted signature.
+- Afterwards the GCP project was deleted (`DELETE_REQUESTED`; Google purges it
+  after about 30 days) and the spike realm objects were removed. The script was
+  not committed.
+
+### What was not proven
+
+- It was not run through this stack's gateway, `workbench` realm, on-behalf-of
+  exchange or a deployed `https` issuer. The spike used its own realm and a fake
+  issuer name with uploaded keys.
+- A public issuer where GCP fetches the signing keys itself was not tried.
+- Per-agent IAM conditions through `attribute.agent=assertion.azp` were not
+  tried.
+- Key rotation, token expiry in a long-running agent and quota behaviour were
+  not tested. (Federated tokens lived about 300 seconds in the spike.)
+- Roles beyond the single project read were not tried, nor any service other
+  than the project read API.
+
+### The recipe
 
 1. Give the agent's token (or an exchanged one) the audience
    `https://iam.googleapis.com/projects/<number>/locations/global/workloadIdentityPools/<pool>/providers/<provider>`.
@@ -176,10 +233,11 @@ Not tested against real accounts.
 3. Grant IAM roles to
    `principal://iam.googleapis.com/projects/<number>/locations/global/workloadIdentityPools/<pool>/subject/<sub>`.
 
+### Why the local stack cannot run it
+
 GCP requires an `https` issuer, so this cannot run against the local `http`
 stack. Prefer a public issuer so GCP fetches the signing keys itself; uploaded
-keys must be uploaded again whenever Keycloak rotates them. Mapping
-`attribute.agent=assertion.azp` would allow per-agent IAM conditions (untested).
+keys must be uploaded again whenever Keycloak rotates them.
 
 ## Limits
 
