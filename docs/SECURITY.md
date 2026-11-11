@@ -51,6 +51,13 @@ issuer continuity and the provider integration test matrix.
   session. A subsequent sign-in may be automatic. Add provider-supported RP-initiated
   logout and account revocation handling if the product needs them.
 
+The MCP service accepts only bearer tokens whose `aud` is `PUBLIC_URL/mcp` with the
+`mcp:tools` scope, checked against Keycloak's signing keys on every request. It holds
+no client secret, never forwards or logs tokens, and checks Host and Origin. Keycloak still
+advertises its client-registration endpoint; this demo relies on Keycloak's default
+anonymous-registration policy, which rejects it (`make smoke` checks for 403). Its tools use the same owner scoping as the API. See
+[MCP.md](MCP.md).
+
 The first page and health endpoint are intentionally public. Login is required for
 job records, submissions, and reports. Keycloak admin routes are blocked by nginx.
 There is no registration UI. To add another local user use the Keycloak admin CLI;

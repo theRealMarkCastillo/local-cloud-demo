@@ -85,6 +85,12 @@ chooses explicit behavior over promising a sleeping full stack. For cheaper dev,
 stop the three apps deliberately when done, or add a tested Flycast/wake strategy.
 Scaling workers to zero does not delete Neon data or the S3 bucket.
 
+## MCP service
+
+The Fly and Render definitions do not include the sample `mcp` service; it is not
+deployed or runtime-tested in the cloud. [MCP.md](MCP.md#cloud) lists the settings to add
+it as a private service and the optional Keycloak CIMD/resource-indicator features.
+
 ## Social identity providers
 
 If Keycloak brokers Google/Apple, the application still points at Keycloak's issuer.

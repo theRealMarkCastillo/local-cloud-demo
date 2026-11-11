@@ -44,7 +44,7 @@ private MinIO bucket. Download it through the authenticated API. Reports and job
 lists are scoped to the OIDC issuer + subject of the signed-in user.
 
 ```sh
-make smoke                       # Real OIDC login + full background job path
+make smoke                       # Real OIDC login, full job path, MCP PKCE login + tools
 make email-config                # Reapply local Keycloak/Mailpit settings
 make email-test                  # Send a synthetic message to local Mailpit
 make email-smoke                 # Verify account email/reset flow with a synthetic user
@@ -66,6 +66,9 @@ flowchart LR
   Browser --> Web[Web / nginx :8080]
   Web --> API[FastAPI]
   Web --> KC[Local Keycloak]
+  Web --> MCP[MCP server]
+  MCP --> PG
+  MCP --> S3
   API --> PG[(Postgres: records + durable queue)]
   API --> Redis[(Redis: sessions + wake-ups)]
   Worker --> PG
@@ -83,6 +86,7 @@ flowchart LR
 | web | Static UI and same-origin reverse proxy | Same Dockerfile on Fly or Render |
 | api | OIDC login, sessions, authorization, job API, downloads | Same Dockerfile |
 | worker | Separate process, same backend image | Same image, different command |
+| mcp | MCP tools for the user's jobs/reports; Keycloak tokens for `PUBLIC_URL/mcp` | Same image, different command (not in cloud manifests) |
 | postgres | App data and durable job records | Neon with TLS |
 | redis | Server-side sessions and disposable job notifications | TLS Redis-compatible service |
 | minio | Local S3-compatible private bucket | Private S3-compatible bucket |
@@ -92,6 +96,9 @@ flowchart LR
 | init | Versioned app schema + local private bucket | Release migration; pre-created cloud bucket |
 
 Email setup, account recovery and SMTP deployment settings: [EMAIL.md](docs/EMAIL.md).
+
+Connect an MCP client, how its tokens are checked, and the optional CIMD setup:
+[MCP.md](docs/MCP.md).
 
 Redis is not the durable job queue: losing a notification does not lose a job.
 Workers poll Postgres and claim rows with `FOR UPDATE SKIP LOCKED`. A short job
@@ -182,7 +189,7 @@ workers will wake automatically. Local Compose is the primary development path.
 - `web/`: browser UI, nginx configuration, web Dockerfile.
 - `identity/`: local-only Keycloak realm import.
 - `cloud/`: separate Render Blueprint and Fly app definitions.
-- `scripts/`: localhost smoke test and public-origin configuration helper.
+- `scripts/`: localhost smoke test, public-origin helper, local Keycloak email and MCP configuration.
 
 The MinIO image is a digest-pinned **Chainguard build of MinIO**, because the
 upstream Docker Hub/Quay images were unavailable during setup. It runs only inside

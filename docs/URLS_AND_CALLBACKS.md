@@ -38,6 +38,7 @@ integration is implemented in this demo.
 | Keycloak public issuer: `PUBLIC_URL/identity/realms/workbench` | Local Compose. Cloud can use a separate OIDC issuer instead. Changing issuer changes the app's issuer+subject identity namespace; existing jobs may appear under the previous identity. Restore the old issuer to regain that identity; no automatic relinking occurs. |
 | Google broker callback: `PUBLIC_URL/identity/realms/workbench/broker/google/endpoint` | Example for alias `google`; copy the exact URL from Keycloak and register it externally. |
 | Apple broker callback | Integration-specific; Apple support is not bundled. See [SOCIAL_LOGIN.md](SOCIAL_LOGIN.md). |
+| MCP resource: `PUBLIC_URL/mcp`; metadata `PUBLIC_URL/.well-known/oauth-protected-resource/mcp` | Derived from `PUBLIC_URL`. `scripts/configure_mcp.py` sets the `mcp:tools` audience to it; `make tunnel-set` reruns it. Client `workbench-mcp` accepts loopback redirect URIs on any port. See [MCP.md](MCP.md). |
 | Browser API/report paths | Relative `/api/...`; reports pass through authenticated API access rather than exposing MinIO. |
 | Internal OIDC/S3 endpoints | Local `OIDC_INTERNAL_URL` / `S3_ENDPOINT` remain Docker-network addresses. Cloud endpoints are configured independently. |
 

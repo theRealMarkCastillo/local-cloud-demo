@@ -24,6 +24,7 @@ A changed database URL does not copy data, and a changed issuer does not migrate
 | Short-lived state | Redis | Server sessions + expendable worker wake-ups; not authoritative job data |
 | Files / reports | Private MinIO bucket | S3 API and scoped cloud credentials |
 | Authentication / SSO | Keycloak using OIDC | Stable issuer; separate client per app/environment |
+| MCP tools | `mcp` service; Keycloak `mcp:tools` scope with audience `PUBLIC_URL/mcp` | Resource URL per MCP server; public PKCE client; no token passthrough; see `MCP.md` |
 | Social login | Not configured | Keycloak brokering; see `SOCIAL_LOGIN.md` |
 | Secrets | Ignored local file; cloud secret settings | Inject at runtime into only the service that needs them |
 
