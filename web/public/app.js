@@ -39,7 +39,8 @@ document.querySelector('#job-form').addEventListener('submit', async event => {
   } catch (error) { notice.textContent = error.message; }
   finally { button.disabled = false; }
 });
-const STEP_NAMES = {llm: 'Ask the LLM', list_jobs: 'List your jobs (on your behalf)', jira: 'Ask the connected service who you are'};
+const STEP_NAMES = {llm: 'Ask the LLM', list_jobs: 'List your jobs (on your behalf)', jira: 'Ask the connected service who you are',
+  reporter: 'Ask the reporter agent (agent to agent)'};
 document.querySelector('#run-agent').addEventListener('click', async event => {
   const button = event.currentTarget, target = document.querySelector('#agent-steps');
   button.disabled = true; target.replaceChildren();

@@ -1,4 +1,5 @@
 """Sample in-stack agent. It acts for the signed-in user as `workbench-agent` and reaches everything through the gateway."""
+import secrets
 import httpx
 from app import settings as s
 from app.gateway_client import call_tool, exchange, payload
@@ -23,8 +24,31 @@ def tool_step(step: str, status: int, body: dict, describe) -> dict:
     return {"step": step, "status": status if status != 200 else 502, "detail": "failed"}
 
 
+async def ask_reporter(http: httpx.AsyncClient, token: str) -> dict:
+    """Agent to agent: ask the reporter, through the gateway, for a report on the user's jobs."""
+    # A fresh trace id lets the gateway's two audit lines (this hop and the reporter's own call) be joined.
+    traceparent = f"00-{secrets.token_hex(16)}-{secrets.token_hex(8)}-01"
+    response = await http.post(
+        s.GATEWAY_INTERNAL_URL + "/gateway/a2a/reporter",
+        headers={"Authorization": "Bearer " + token, "A2A-Version": "1.0", "traceparent": traceparent},
+        json={"jsonrpc": "2.0", "id": "1", "method": "SendMessage", "params": {"message": {
+            "role": "ROLE_USER", "messageId": secrets.token_hex(8), "parts": [{"text": "Report on my jobs"}]}}})
+    task = (payload(response).get("result") or {}).get("task") or {} if response.status_code == 200 else {}
+    if not task:
+        return {"step": "reporter", "status": response.status_code if response.status_code != 200 else 502, "detail": "failed"}
+
+    def first_text(parts) -> str:
+        return next((str(part["text"]) for part in parts or [] if isinstance(part, dict) and "text" in part), "")
+
+    status = task.get("status") or {}
+    if status.get("state") == "TASK_STATE_COMPLETED":
+        report = next((first_text(artifact.get("parts")) for artifact in task.get("artifacts") or []), "")
+        return {"step": "reporter", "status": 200, "detail": report}
+    return {"step": "reporter", "status": 502, "detail": first_text((status.get("message") or {}).get("parts")) or "failed"}
+
+
 async def run(user_access_token: str, http: httpx.AsyncClient) -> dict:
-    """A fixed three-step script: ask the LLM, list the user's jobs, ask the SaaS stand-in who we are."""
+    """A fixed four-step script: ask the LLM, list the user's jobs, ask the SaaS stand-in who we are, ask the reporter agent."""
     token = await gateway_token(user_access_token, http)
     chat = await http.post(s.GATEWAY_INTERNAL_URL + "/gateway/llm/v1/chat/completions",
                            headers={"Authorization": "Bearer " + token},
@@ -36,6 +60,7 @@ async def run(user_access_token: str, http: httpx.AsyncClient) -> dict:
     steps.append(tool_step("list_jobs", status, body, lambda content: f"{len(content.get('jobs', []))} jobs"))
     status, body = await call_tool(http, token, "/gateway/mcp/jira", "whoami")
     steps.append(tool_step("jira", status, body, lambda content: str(content.get("upstream_user", ""))))
+    steps.append(await ask_reporter(http, token))
     return {"steps": steps}
 
 

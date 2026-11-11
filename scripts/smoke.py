@@ -481,13 +481,17 @@ print("PASS: another user stays unconnected")
 fresh_gateway()
 fetch(demo_browser, "/api/agent/run", "POST", expected=403)
 ran = fetch(demo_browser, "/api/agent/run", "POST", token=demo_me["csrf"])
-assert [(step["step"], step["status"]) for step in ran["steps"]] == [("llm", 200), ("list_jobs", 200), ("jira", 200)], ran
+assert [(step["step"], step["status"]) for step in ran["steps"]] == [
+    ("llm", 200), ("list_jobs", 200), ("jira", 200), ("reporter", 200)], ran
 assert ran["steps"][2]["detail"] == "demo-upstream", ran
+assert ran["steps"][3]["detail"].startswith(ran["steps"][1]["detail"].split()[0] + " job"), ran  # same count, read by the reporter
 demo_sub = json.loads(base64.urlsafe_b64decode(agent_demo.split(".")[1] + "=="))["sub"]
 audit = subprocess.run(["docker", "compose", "logs", "--since", "2m", "gateway"], cwd=ROOT, check=True,
                        capture_output=True, text=True).stdout
 assert any("workbench-agent" in line and demo_sub in line and "mcp-jira" in line for line in audit.splitlines()), \
     "Gateway audit log lacks the in-stack agent acting for demo"
+assert any("workbench-agent" in line and demo_sub in line and "a2a-reporter" in line for line in audit.splitlines()), \
+    "Gateway audit log lacks the in-stack agent calling the reporter for demo"
 assert agent_demo not in audit, "Tokens must not reach the gateway log"
 print("PASS: in-stack agent runs through the gateway with CSRF")
 fetch(demo_browser, "/api/connections/upstream-demo", "DELETE", token=demo_me["csrf"])

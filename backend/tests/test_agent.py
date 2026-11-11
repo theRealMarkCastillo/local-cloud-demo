@@ -17,8 +17,9 @@ NOT_CONNECTED = {"error": "account_not_connected", "connect_url": "http://localh
 class Gateway:
     """Mock Keycloak token endpoint, gateway routes and credentials service."""
 
-    def __init__(self, exchange_status=200, jira_connected=True):
+    def __init__(self, exchange_status=200, jira_connected=True, reporter="ok"):
         self.exchange_status, self.jira_connected, self.requests = exchange_status, jira_connected, []
+        self.reporter = reporter  # "ok", "failed" (a failed A2A task) or an HTTP status the gateway answers with
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
@@ -32,6 +33,8 @@ class Gateway:
         assert request.headers["authorization"] == "Bearer gateway-token", "the agent must only present the exchanged token"
         if url.endswith("/gateway/llm/v1/chat/completions"):
             return httpx.Response(200, json={"choices": [{"message": {"content": "stub reply"}}], "usage": {"total_tokens": 500}})
+        if url.endswith("/gateway/a2a/reporter"):
+            return self.reporter_reply()
         body = json.loads(request.content)
         if url.endswith("/gateway/mcp/jira") and not self.jira_connected:
             return httpx.Response(403, json=NOT_CONNECTED)
@@ -45,6 +48,15 @@ class Gateway:
         # agentgateway answers tool calls as an event stream.
         event = json.dumps({"jsonrpc": "2.0", "id": 2, "result": {"structuredContent": content, "isError": False}})
         return httpx.Response(200, text=f"event: message\ndata: {event}\n\n", headers={"Content-Type": "text/event-stream"})
+
+    def reporter_reply(self) -> httpx.Response:
+        if isinstance(self.reporter, int):
+            return httpx.Response(self.reporter, text="authorization failed")
+        if self.reporter == "failed":
+            status = {"state": "TASK_STATE_FAILED", "message": {"role": "ROLE_AGENT", "parts": [{"text": "not allowed to read jobs"}]}}
+            return httpx.Response(200, json={"jsonrpc": "2.0", "id": "1", "result": {"task": {"id": "t", "status": status}}})
+        task = {"id": "t", "status": {"state": "TASK_STATE_COMPLETED"}, "artifacts": [{"parts": [{"text": "2 jobs: 2 complete"}]}]}
+        return httpx.Response(200, json={"jsonrpc": "2.0", "id": "1", "result": {"task": task}})
 
     def client(self):
         return httpx.AsyncClient(transport=httpx.MockTransport(self.handler))
@@ -74,7 +86,32 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["steps"], [
             {"step": "llm", "status": 200, "detail": "stub reply"},
             {"step": "list_jobs", "status": 200, "detail": "2 jobs"},
-            {"step": "jira", "status": 200, "detail": "demo-upstream"}])
+            {"step": "jira", "status": 200, "detail": "demo-upstream"},
+            {"step": "reporter", "status": 200, "detail": "2 jobs: 2 complete"}])
+
+    async def test_reporter_failed_task_is_a_step_result(self):
+        async with Gateway(reporter="failed").client() as http:
+            result = await agent.run("user-token", http)
+        self.assertEqual(result["steps"][3], {"step": "reporter", "status": 502, "detail": "not allowed to read jobs"})
+        self.assertEqual([step["status"] for step in result["steps"][:3]], [200, 200, 200])
+
+    async def test_reporter_forbidden_is_a_step_result(self):
+        async with Gateway(reporter=403).client() as http:
+            result = await agent.run("user-token", http)
+        self.assertEqual(result["steps"][3], {"step": "reporter", "status": 403, "detail": "failed"})
+
+    async def test_reporter_call_presents_exchanged_token_and_traceparent(self):
+        gateway = Gateway()
+        async with gateway.client() as http:
+            await agent.run("user-token", http)
+        request = gateway.requests[-1]
+        self.assertTrue(str(request.url).endswith("/gateway/a2a/reporter"))
+        self.assertEqual(request.headers["authorization"], "Bearer gateway-token")
+        self.assertEqual(request.headers["a2a-version"], "1.0")
+        self.assertRegex(request.headers["traceparent"], r"^00-[0-9a-f]{32}-[0-9a-f]{16}-01$")
+        sent = json.loads(request.content)
+        self.assertEqual(sent["method"], "SendMessage")
+        self.assertEqual(sent["params"]["message"]["role"], "ROLE_USER")
 
     async def test_jira_not_connected_is_a_step_result(self):
         async with Gateway(jira_connected=False).client() as http:
