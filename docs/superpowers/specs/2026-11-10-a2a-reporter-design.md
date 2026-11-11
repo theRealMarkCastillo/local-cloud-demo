@@ -171,7 +171,8 @@ A failed task is a normal step result for agent A, not an exception.
    stop and return to design: the route cannot work as specified.
 2. **Token limits.** Using a throwaway caller client without `workbench:read`, find
    whether the reporter's hop-2 token still reaches `list_jobs`. The result fixes one
-   docs sentence and one smoke assertion; it does not change the design.
+   docs sentence; it does not change the design. No shipped client lacks
+   `workbench:read`, so this is gate evidence, not a permanent smoke check.
 3. **Headers.** `traceparent` and `x-calling-agent` reach the reporter and both appear
    in the gateway access log. Fallback: log `traceparent` in the reporter and join on
    `sub` plus time.
