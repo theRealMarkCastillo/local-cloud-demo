@@ -243,3 +243,23 @@ JWKS; uploaded JWKS must be re-uploaded on Keycloak key rotation.
 Per-user API keys and a secret store; real Jira/GitHub/Entra accounts;
 Keycloak delegation (`act`) and Okta Cross App Access; per-agent budgets;
 persistent budgets; GCP build-out; cloud deployment.
+
+## Changes made during implementation
+
+- **Gateway audience.** The gateway and `credentials` accept the audience
+  `PUBLIC_URL/gateway`, mapped only on agent clients, instead of the client id
+  `gateway`. Keycloak adds client-id audiences to any token that carries that
+  client's roles, so a full-scope client could otherwise act as an agent. Agent
+  clients keep the client-id audiences so the exchanges work. `workbench-mcp`
+  also lost full scope.
+- **Role-denied body.** agentgateway answers a missing route role with a plain
+  `403 authorization failed`, not the JSON body above.
+- **Connect link.** `connect_url` is `PUBLIC_URL/connections.html?service=<alias>`.
+- **Host header.** The MCP server and `stubs` allow the internal host names the
+  gateway sends (`mcp`, `stubs`) instead of a gateway authority rewrite.
+- **Disconnect.** `credentials` has `POST /evict/{alias}`; the API calls it on
+  disconnect so the cached token is dropped at once.
+- **Account roles.** Users get the Keycloak account roles through
+  `gateway-users`; the `workbench` client maps them so the API can list and unlink.
+- **Session key.** The gateway takes `SESSION_KEY` (`GATEWAY_SESSION_KEY`) to
+  encrypt MCP session IDs.

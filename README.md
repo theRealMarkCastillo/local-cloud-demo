@@ -44,7 +44,7 @@ private MinIO bucket. Download it through the authenticated API. Reports and job
 lists are scoped to the OIDC issuer + subject of the signed-in user.
 
 ```sh
-make smoke                       # Real OIDC login, full job path, MCP PKCE login + tools
+make smoke                       # Real OIDC login, full job path, MCP tools, outbound gateway
 make email-config                # Reapply local Keycloak/Mailpit settings
 make email-test                  # Send a synthetic message to local Mailpit
 make email-smoke                 # Verify account email/reset flow with a synthetic user
@@ -69,6 +69,15 @@ flowchart LR
   Web --> MCP[MCP server]
   MCP --> PG
   MCP --> S3
+  MCP --> Redis
+  MCP --> KC
+  Web --> GW[Outbound gateway]
+  API --> GW
+  GW --> MCP
+  GW --> Cred[credentials]
+  Cred --> KC
+  GW --> KC
+  GW --> Stubs[stubs: LLM, echo, Jira stand-ins]
   API --> PG[(Postgres: records + durable queue)]
   API --> Redis[(Redis: sessions + wake-ups)]
   Worker --> PG
@@ -87,6 +96,9 @@ flowchart LR
 | api | OIDC login, sessions, authorization, job API, downloads | Same Dockerfile |
 | worker | Separate process, same backend image | Same image, different command |
 | mcp | MCP tools for the user's jobs/reports; Keycloak tokens for `PUBLIC_URL/mcp` | Same image, different command (not in cloud manifests) |
+| gateway | Outbound agent gateway (agentgateway): role checks, token exchange, shared keys, LLM budgets, audit log | Not in cloud manifests |
+| credentials | Hands the gateway each user's stored connected-account token | Same image, different command (not in cloud manifests) |
+| stubs | Local stand-ins: fake LLM, echo, Jira-like MCP server | None; local only |
 | postgres | App data and durable job records | Neon with TLS |
 | redis | Server-side sessions and disposable job notifications | TLS Redis-compatible service |
 | minio | Local S3-compatible private bucket | Private S3-compatible bucket |
@@ -99,6 +111,9 @@ Email setup, account recovery and SMTP deployment settings: [EMAIL.md](docs/EMAI
 
 Connect an MCP client, how its tokens are checked, and the optional CIMD setup:
 [MCP.md](docs/MCP.md).
+
+How agents reach LLMs, MCP servers and connected accounts on a user's behalf:
+[GATEWAY.md](docs/GATEWAY.md).
 
 Redis is not the durable job queue: losing a notification does not lose a job.
 Workers poll Postgres and claim rows with `FOR UPDATE SKIP LOCKED`. A short job
@@ -187,9 +202,10 @@ workers will wake automatically. Local Compose is the primary development path.
 - `compose.dev.yaml`: local development overrides only.
 - `backend/`: API, worker, versioned schema runner, one shared Dockerfile.
 - `web/`: browser UI, nginx configuration, web Dockerfile.
-- `identity/`: local-only Keycloak realm import.
+- `identity/`: local-only Keycloak realm imports (the app realm and a stand-in upstream service).
+- `gateway/`: outbound gateway configuration.
 - `cloud/`: separate Render Blueprint and Fly app definitions.
-- `scripts/`: localhost smoke test, public-origin helper, local Keycloak email and MCP configuration.
+- `scripts/`: localhost smoke test, public-origin helper, local Keycloak email, MCP and gateway configuration.
 
 The MinIO image is a digest-pinned **Chainguard build of MinIO**, because the
 upstream Docker Hub/Quay images were unavailable during setup. It runs only inside

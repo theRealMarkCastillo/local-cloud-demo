@@ -58,6 +58,18 @@ advertises its client-registration endpoint; this demo relies on Keycloak's defa
 anonymous-registration policy, which rejects it (`make smoke` checks for 403). Its tools use the same owner scoping as the API. See
 [MCP.md](MCP.md).
 
+The outbound gateway accepts only bearer tokens whose `aud` includes `PUBLIC_URL/gateway`,
+which only registered agent clients map, and checks a Keycloak role for each route. Tokens
+carry the roles the user holds and the agent is mapped to, nothing more. Downstream services
+receive the user's identity through token exchange or the user's own connected-account token;
+only the shared-key and LLM routes use a system credential. The `credentials` service is the
+only client mapped to Keycloak's `broker/read-token`, so agents and browser sessions cannot
+read stored upstream tokens; those tokens are never logged, written to Redis or returned to
+an agent. The gateway, `credentials` and `stubs` publish no host ports. The API keeps the
+user's own Keycloak access and refresh tokens in the server-side session for the Connections
+page and the sample agent; logout deletes them, and gateway tokens already issued stay valid
+for up to five minutes. See [GATEWAY.md](GATEWAY.md).
+
 The first page and health endpoint are intentionally public. Login is required for
 job records, submissions, and reports. Keycloak admin routes are blocked by nginx.
 There is no registration UI. To add another local user use the Keycloak admin CLI;

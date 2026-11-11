@@ -39,6 +39,9 @@ integration is implemented in this demo.
 | Google broker callback: `PUBLIC_URL/identity/realms/workbench/broker/google/endpoint` | Example for alias `google`; copy the exact URL from Keycloak and register it externally. |
 | Apple broker callback | Integration-specific; Apple support is not bundled. See [SOCIAL_LOGIN.md](SOCIAL_LOGIN.md). |
 | MCP resource: `PUBLIC_URL/mcp`; metadata `PUBLIC_URL/.well-known/oauth-protected-resource/mcp` | Derived from `PUBLIC_URL`. `scripts/configure_mcp.py` sets the `mcp:tools` audience to it; `make tunnel-set` reruns it. Client `workbench-mcp` accepts loopback redirect URIs on any port. See [MCP.md](MCP.md). |
+| Outbound gateway: `PUBLIC_URL/gateway/*`; token audience `PUBLIC_URL/gateway` | Derived from `PUBLIC_URL`. `scripts/configure_gateway.py` sets the agent clients' audience; `make tunnel-set` reruns it. Agent clients accept loopback redirect URIs. See [GATEWAY.md](GATEWAY.md). |
+| Account-link callback: `PUBLIC_URL/auth/link-callback` | API; `scripts/configure_gateway.py` adds it to the `workbench` client's redirect URIs. |
+| Connected-account broker callback: `PUBLIC_URL/identity/realms/workbench/broker/upstream-demo/endpoint` | Local stand-in provider; `scripts/configure_gateway.py` registers it in the `upstream-demo` realm. A real provider needs this URL registered in its own console. |
 | Browser API/report paths | Relative `/api/...`; reports pass through authenticated API access rather than exposing MinIO. |
 | Internal OIDC/S3 endpoints | Local `OIDC_INTERNAL_URL` / `S3_ENDPOINT` remain Docker-network addresses. Cloud endpoints are configured independently. |
 

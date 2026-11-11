@@ -91,6 +91,15 @@ The Fly and Render definitions do not include the sample `mcp` service; it is no
 deployed or runtime-tested in the cloud. [MCP.md](MCP.md#cloud) lists the settings to add
 it as a private service and the optional Keycloak CIMD/resource-indicator features.
 
+## Outbound gateway
+
+The Fly and Render definitions do not include `gateway`, `credentials` or `stubs`; the
+gateway is not deployed or runtime-tested in the cloud. A deployment would run `gateway`
+and `credentials` as private services, replace every `local-only-` secret, replace the
+`upstream-demo` stand-in with real providers, and keep the gateway's admin port private.
+Per-user GCP access needs the `https` issuer a deployed stack has; see
+[GATEWAY.md](GATEWAY.md).
+
 ## Social identity providers
 
 If Keycloak brokers Google/Apple, the application still points at Keycloak's issuer.
