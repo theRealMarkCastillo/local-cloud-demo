@@ -1,0 +1,48 @@
+{
+  "realm": "upstream-demo",
+  "enabled": true,
+  "registrationAllowed": false,
+  "sslRequired": "none",
+  "accessTokenLifespan": 300,
+  "clients": [
+    {
+      "clientId": "workbench-broker",
+      "name": "Workbench broker (stand-in SaaS client)",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "${UPSTREAM_BROKER_SECRET}",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": ["${PUBLIC_URL}/identity/realms/workbench/broker/upstream-demo/endpoint*"],
+      "webOrigins": [],
+      "attributes": {"pkce.code.challenge.method": "S256"},
+      "protocolMappers": [
+        {
+          "name": "jira-stub-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "jira-stub",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "demo-upstream",
+      "enabled": true,
+      "email": "demo-upstream@example.test",
+      "emailVerified": true,
+      "firstName": "Demo",
+      "lastName": "Upstream",
+      "credentials": [{"type": "password", "value": "${DEMO_PASSWORD}", "temporary": false}]
+    }
+  ]
+}

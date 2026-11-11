@@ -170,7 +170,10 @@ services:
       PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8080}
       DEMO_PASSWORD: ${DEMO_PASSWORD:-demo-password}
       OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-local-only-oidc-secret}
-    volumes: ['./identity/workbench-realm.json:/opt/keycloak/data/import/workbench-realm.json:ro']
+      UPSTREAM_BROKER_SECRET: ${UPSTREAM_BROKER_SECRET:-local-only-broker-secret}
+    volumes:
+      - './identity/workbench-realm.json:/opt/keycloak/data/import/workbench-realm.json:ro'
+      - './identity/upstream-demo-realm.json:/opt/keycloak/data/import/upstream-demo-realm.json:ro'
     depends_on:
       keycloak-db:
         condition: service_healthy
