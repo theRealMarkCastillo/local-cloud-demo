@@ -240,15 +240,15 @@ GATEWAY = BASE + "/gateway"
 def local_env(name, default):
     return os.getenv(name) or default
 
-def gw(path, token=None, body=None, session=None, method=None):
-    headers = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream",
+def gw(path, token=None, body=None, session=None, method=None, headers=None):
+    sent = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream",
                "MCP-Protocol-Version": PROTOCOL}
     if token:
-        headers["Authorization"] = "Bearer " + token
+        sent["Authorization"] = "Bearer " + token
     if session:
-        headers["Mcp-Session-Id"] = session
+        sent["Mcp-Session-Id"] = session
     data = json.dumps(body).encode() if body is not None else None
-    request = urllib.request.Request(GATEWAY + path, data=data, headers=headers, method=method or ("POST" if data else "GET"))
+    request = urllib.request.Request(GATEWAY + path, data=data, headers=sent | (headers or {}), method=method or ("POST" if data else "GET"))
     try:
         response = urllib.request.urlopen(request, timeout=30, context=TLS)
     except urllib.error.HTTPError as error:
@@ -328,9 +328,73 @@ status, _, reply = gw("/llm/v1/chat/completions", agent_other, chat)
 provider_prefix = ("Bearer " + local_env("GATEWAY_LLM_KEY", "local-only-llm-key"))[:15]
 assert status == 200 and reply["choices"][0]["message"]["content"].endswith("auth=" + provider_prefix), reply
 print("PASS: LLM budget is per user")
+# --- Agent to agent: the reporter is called through the gateway and reads jobs with its own exchanged token ---
+A2A = "/a2a/reporter"
+
+def a2a(token, headers=None):
+    body = {"jsonrpc": "2.0", "id": "1", "method": "SendMessage", "params": {"message": {
+        "role": "ROLE_USER", "messageId": os.urandom(8).hex(), "parts": [{"text": "report"}]}}}
+    status, _, payload = gw(A2A, token, body, headers={"A2A-Version": "1.0"} | (headers or {}))
+    return status, payload
+
+def report_text(payload):
+    task = payload["result"]["task"]
+    assert task["status"]["state"] == "TASK_STATE_COMPLETED", task
+    return task["artifacts"][0]["parts"][0]["text"]
+
+def exchanged(client_id, secret, subject_token, scope=None):
+    form = {"grant_type": "urn:ietf:params:oauth:grant-type:token-exchange", "subject_token": subject_token,
+            "subject_token_type": "urn:ietf:params:oauth:token-type:access_token",
+            "requested_token_type": "urn:ietf:params:oauth:token-type:access_token"} | ({"scope": scope} if scope else {})
+    basic = base64.b64encode(f"{client_id}:{secret}".encode()).decode()
+    request = urllib.request.Request(oidc["token_endpoint"], data=urllib.parse.urlencode(form).encode(),
+                                     headers={"Authorization": "Basic " + basic})
+    return json.load(urllib.request.urlopen(request, timeout=20, context=TLS))["access_token"]
+
+def compose_logs(service):
+    return subprocess.run(["docker", "compose", "logs", "--since", "1m", service], cwd=ROOT, check=True,
+                          capture_output=True, text=True).stdout
+
+assert a2a(writer_demo)[0] == 403, "agent-cli-writer has no reporter:use"
+print("PASS: A2A route denies an agent without reporter:use")
+assert gw(A2A + "/.well-known/agent-card.json")[0] == 401
+status, _, card = gw(A2A + "/.well-known/agent-card.json", agent_demo)
+assert status == 200 and [skill["id"] for skill in card["skills"]] == ["job_report"], card
+assert card["supportedInterfaces"][0]["url"].startswith(GATEWAY + A2A), card["supportedInterfaces"]
+print("PASS: agent card is served through the gateway with its URL rewritten")
+status, reported = a2a(agent_demo)
+assert status == 200 and report_text(reported).startswith(f"{len(demo_ids)} job"), (status, reported, len(demo_ids))
+status, reported = a2a(agent_other)
+assert status == 200 and report_text(reported).startswith(f"{len(other_ids)} job"), (status, reported, len(other_ids))
+print("PASS: reporter reads only the calling user's jobs")
+for_reporter = exchanged("gateway", local_env("GATEWAY_CLIENT_SECRET", "local-only-gateway-secret"), agent_demo, "agent:reporter")
+as_reporter = exchanged("reporter-agent", local_env("REPORTER_AGENT_SECRET", "local-only-reporter-secret"), for_reporter)
+reporter_claims = json.loads(base64.urlsafe_b64decode(as_reporter.split(".")[1] + "=="))
+assert reporter_claims["azp"] == "reporter-agent" and reporter_claims["resource_access"]["gateway"]["roles"] == ["workbench:read"], reporter_claims
+reporter_session = gw_session(WB, as_reporter)
+status, denied = gw_tool(WB, as_reporter, reporter_session, "submit_job", {"title": "blocked", "text": "x"})
+assert status != 200 or "error" in denied or denied["result"].get("isError"), f"the reporter must not submit jobs: {denied}"
+print("PASS: the reporter's token cannot write jobs")
+trace = os.urandom(16).hex()
+status, reported = a2a(agent_demo, {"traceparent": f"00-{trace}-{os.urandom(8).hex()}-01", "x-calling-agent": "evil"})
+assert status == 200 and report_text(reported), reported
+for attempt in range(10):
+    hops = [line for line in compose_logs("gateway").splitlines() if "trace.id=" + trace in line]
+    if len(hops) >= 4:
+        break
+    time.sleep(1)
+assert any("a2a-reporter" in line and '"agent-cli"' in line for line in hops), hops
+assert any("mcp-workbench" in line and '"reporter-agent"' in line for line in hops), hops
+agent_sub = json.loads(base64.urlsafe_b64decode(agent_demo.split(".")[1] + "=="))["sub"]
+reporter_log = compose_logs("reporter")
+assert f"sub={agent_sub} caller=agent-cli outcome=ok" in reporter_log, "The reporter must log the gateway's calling agent"
+assert "evil" not in reporter_log, "A client-supplied x-calling-agent must not be believed"
+for secret_value in (agent_demo, for_reporter, as_reporter):
+    assert secret_value not in reporter_log and secret_value not in compose_logs("gateway"), "Tokens must not be logged"
+print("PASS: two audit lines share one trace id across both hops")
 composed = json.loads(subprocess.run(["docker", "compose", "config", "--format", "json"], cwd=ROOT, check=True,
                                      capture_output=True, text=True).stdout)["services"]
-for name in ("gateway", "credentials", "stubs"):
+for name in ("gateway", "credentials", "stubs", "reporter"):
     assert not composed[name].get("ports"), f"{name} must not publish host ports"
 for port in (15000, 3000):
     try:

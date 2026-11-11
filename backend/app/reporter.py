@@ -129,6 +129,12 @@ def create_app(verifier: mcp_auth.KeycloakTokenVerifier | None = None, http_fact
 
     @asynccontextmanager
     async def lifespan(app):
+        if not log.handlers:  # uvicorn configures only its own loggers; without this the audit lines are dropped
+            handler = logging.StreamHandler()
+            handler.setFormatter(logging.Formatter("%(levelname)s:     %(message)s"))
+            log.addHandler(handler)
+            log.setLevel(logging.INFO)
+            log.propagate = False
         if state["verifier"] is None:
             state["verifier"] = mcp_auth.from_settings(AUDIENCE, None)
         yield

@@ -62,6 +62,32 @@ binds:
           targets:
           - name: jira
             mcp: {host: "http://stubs:8000/jira/mcp"}
+    # Agent to agent (A2A): the reporter gets a token for the same user, addressed to itself. The gateway also
+    # rewrites the agent card URL to this route and names the calling agent, which a client cannot forge.
+    - name: a2a-reporter
+      matches: [{path: {pathPrefix: /gateway/a2a/reporter}}]
+      policies:
+        jwtAuth: *jwt
+        authorization:
+          rules: ["'reporter:use' in jwt.resource_access.gateway.roles"]
+        a2a: {}
+        urlRewrite:
+          path: {prefix: /}
+        transformations:
+          request:
+            set:
+              x-calling-agent: jwt.azp
+      backends:
+      - host: reporter:8000
+        policies:
+          backendAuth:
+            oauthTokenExchange:
+              host: keycloak:8080
+              path: /identity/realms/workbench/protocol/openid-connect/token
+              clientAuth: {clientId: gateway, clientSecret: "${GATEWAY_CLIENT_SECRET}", method: clientSecretBasic}
+              scopes: ["agent:reporter"]
+              subjectToken:
+                source: {expression: "jwt.rawToken.unredacted()"}
     # Shared system key: the user's token never reaches the service.
     - name: echo
       matches: [{path: {pathPrefix: /gateway/echo}}]

@@ -107,6 +107,8 @@ services:
         condition: service_healthy
       stubs:
         condition: service_healthy
+      reporter:
+        condition: service_healthy
     restart: unless-stopped
   # Hands the gateway each user's stored connected-account token. Internal only.
   credentials:
