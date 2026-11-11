@@ -1,0 +1,8 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Connections · Workbench</title><link rel="stylesheet" href="/style.css"><script src="/connections.js" defer></script></head>
+<body><main><header><span class="eyebrow">CONNECTED ACCOUNTS</span><h1>Connections</h1><p>Link your own account at an outside service once. Agents acting for you then reach that service as you, through the gateway. They never see the stored credential.</p></header>
+<p><a class="back" href="/">← Back to the workbench</a></p>
+<div id="notice" role="status" aria-live="polite"></div>
+<section id="signed-out" hidden><h2>Sign in first.</h2><a class="button" href="/auth/login">Sign in to the workbench →</a></section>
+<section id="connections" hidden><h2>Your accounts</h2><div id="list"></div><p class="hint">Disconnecting removes the stored credential at once. Locally, the outside service is a stand-in Keycloak realm: <code>demo-upstream</code> / <code>demo-password</code>.</p></section>
+</main></body></html>

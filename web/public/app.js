@@ -39,6 +39,24 @@ document.querySelector('#job-form').addEventListener('submit', async event => {
   } catch (error) { notice.textContent = error.message; }
   finally { button.disabled = false; }
 });
+const STEP_NAMES = {llm: 'Ask the LLM', list_jobs: 'List your jobs (on your behalf)', jira: 'Ask the connected service who you are'};
+document.querySelector('#run-agent').addEventListener('click', async event => {
+  const button = event.currentTarget, target = document.querySelector('#agent-steps');
+  button.disabled = true; target.replaceChildren();
+  try {
+    const {steps} = await api('/api/agent/run', {method: 'POST'});
+    for (const step of steps) {
+      const row = document.createElement('li');
+      const badge = document.createElement('span'); badge.className = `badge ${step.status === 200 ? 'complete' : 'failed'}`; badge.textContent = step.status;
+      row.append(`${STEP_NAMES[step.step] || step.step}: `, badge, ` ${step.detail.replaceAll('_', ' ')}`);
+      if (step.connect_url && new URL(step.connect_url).origin === location.origin) {
+        const link = document.createElement('a'); link.href = step.connect_url; link.textContent = 'Connect the account →'; row.append(' ', link);
+      }
+      target.append(row);
+    }
+  } catch (error) { notice.textContent = error.message; }
+  finally { button.disabled = false; }
+});
 document.querySelector('#logout').addEventListener('click', async () => {
   try { await api('/auth/logout', {method: 'POST'}); active = false; csrf = ''; showLogin(); }
   catch (error) { notice.textContent = error.message; }
