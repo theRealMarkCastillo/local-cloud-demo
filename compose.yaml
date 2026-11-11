@@ -31,10 +31,13 @@ services:
       PORT: '8080'
       API_UPSTREAM: api:8000
       IDENTITY_UPSTREAM: keycloak:8080
+      MCP_UPSTREAM: mcp:8000
     ports:
       - '127.0.0.1:${WEB_PORT:-8080}:8080'
     depends_on:
       api:
+        condition: service_healthy
+      mcp:
         condition: service_healthy
       keycloak:
         condition: service_healthy
@@ -47,6 +50,26 @@ services:
       OIDC_INTERNAL_URL: http://keycloak:8080/identity/realms/workbench
       OIDC_CLIENT_ID: workbench
       OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-local-only-oidc-secret}
+    depends_on:
+      init:
+        condition: service_completed_successfully
+      keycloak:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'python', '-c', 'import urllib.request; urllib.request.urlopen("http://localhost:8000/health", timeout=5)']
+      interval: 10s
+      timeout: 8s
+      retries: 12
+  mcp:
+    <<: *app
+    command: ['uvicorn', 'app.mcp_server:app', '--host', '0.0.0.0', '--port', '8000', '--no-proxy-headers', '--no-access-log']
+    environment:
+      <<: *app-env
+      # Resource server only: validates tokens; holds no OIDC client secret.
+      OIDC_ISSUER_URL: ${PUBLIC_URL:-http://localhost:8080}/identity/realms/workbench
+      OIDC_INTERNAL_URL: http://keycloak:8080/identity/realms/workbench
     depends_on:
       init:
         condition: service_completed_successfully
