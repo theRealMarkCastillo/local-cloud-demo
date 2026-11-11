@@ -12,7 +12,8 @@ LEEWAY_SECONDS = 30
 
 
 class KeycloakTokenVerifier:
-    def __init__(self, issuer: str, audience: str, scope: str, jwks_client):
+    def __init__(self, issuer: str, audience: str, scope: str | None, jwks_client):
+        # scope=None skips the scope check, for resources governed by roles instead.
         self.issuer, self.audience, self.scope, self.jwks = issuer, audience, scope, jwks_client
 
     def _signing_key(self, token: str):
@@ -27,14 +28,22 @@ class KeycloakTokenVerifier:
         return jwt.decode(token, key, algorithms=ALGORITHMS, audience=self.audience, issuer=self.issuer,
                           leeway=LEEWAY_SECONDS, options={"require": ["exp", "iss", "aud", "sub"]})
 
-    async def verify_token(self, token: str) -> AccessToken | None:
+    async def claims(self, token: str) -> dict | None:
+        """Verified claims, or None when the token is not valid for this resource."""
         try:
             claims = await anyio.to_thread.run_sync(self._decode, token)
         except (jwt.PyJWTError, ValueError, TypeError):
             return None
         scopes = str(claims.get("scope", "")).split()
-        if self.scope not in scopes or not claims.get("sub"):
+        if (self.scope is not None and self.scope not in scopes) or not claims.get("sub"):
             return None
+        return claims
+
+    async def verify_token(self, token: str) -> AccessToken | None:
+        claims = await self.claims(token)
+        if claims is None:
+            return None
+        scopes = str(claims.get("scope", "")).split()
         return AccessToken(token=token, client_id=str(claims.get("azp", "")), scopes=scopes,
                            expires_at=int(claims["exp"]), resource=self.audience,
                            subject=str(claims["sub"]), claims={"iss": claims["iss"]})

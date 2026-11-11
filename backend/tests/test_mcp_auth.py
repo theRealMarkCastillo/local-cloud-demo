@@ -65,6 +65,16 @@ class VerifierTests(unittest.IsolatedAsyncioTestCase):
     async def test_missing_scope_rejected(self):
         self.assertIsNone(await self.verifier().verify_token(token(scope="openid profile")))
 
+    async def test_verifier_without_scope_accepts_token(self):
+        verifier = KeycloakTokenVerifier(ISS, AUD, None, StubJwks())
+        self.assertIsNotNone(await verifier.verify_token(token(scope="openid")))
+
+    async def test_claims_returns_verified_claims(self):
+        verifier = KeycloakTokenVerifier(ISS, AUD, None, StubJwks())
+        claims_seen = await verifier.claims(token(resource_access={"gateway": {"roles": ["jira:use"]}}))
+        self.assertEqual(claims_seen["resource_access"]["gateway"]["roles"], ["jira:use"])
+        self.assertIsNone(await verifier.claims(token(aud="other")))
+
     async def test_missing_sub_rejected(self):
         self.assertIsNone(await self.verifier().verify_token(token(sub=None)))
 

@@ -18,6 +18,10 @@ OIDC_CLIENT_SECRET = os.getenv("OIDC_CLIENT_SECRET", "")
 # MCP resource identifier (RFC 8707/9728). Tokens must name it in `aud`.
 MCP_RESOURCE_URL = PUBLIC_URL + "/mcp"
 MCP_SCOPE = "mcp:tools"
+# Outbound gateway: agent tokens name this client in `aud`; the credentials service exchanges them.
+GATEWAY_AUDIENCE = "gateway"
+CREDENTIALS_CLIENT_ID = "gateway-credentials"
+CREDENTIALS_CLIENT_SECRET = os.getenv("CREDENTIALS_CLIENT_SECRET", "")
 S3_ENDPOINT = required("S3_ENDPOINT")  # URL, e.g. http://minio:9000
 S3_ACCESS_KEY = required("S3_ACCESS_KEY")
 S3_SECRET_KEY = required("S3_SECRET_KEY")
