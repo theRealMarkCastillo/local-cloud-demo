@@ -1,5 +1,3 @@
-import hashlib
-import json
 import logging
 import secrets
 import uuid
@@ -10,7 +8,9 @@ from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
 from pydantic import BaseModel, Field
 from app import settings as s
-from app.services import db, redis, storage
+from app import jobs
+from app.identity import owner_id
+from app.services import db, redis
 from app.session import ServerSessionMiddleware
 
 log = logging.getLogger(__name__)
@@ -86,7 +86,7 @@ async def callback(request: Request):
         raise HTTPException(400, "Login failed; start a new sign-in")
     # Authlib verifies ID-token signature, issuer, audience, expiry, nonce, and OAuth state.
     # Identity is issuer + subject, never a mutable email address.
-    owner = hashlib.sha256((s.OIDC_ISSUER_URL + "|" + claims["sub"]).encode()).hexdigest()
+    owner = owner_id(s.OIDC_ISSUER_URL, claims["sub"])
     request.session.clear()
     request.session.update(user={"id": owner, "name": claims.get("name") or claims.get("preferred_username") or "Developer"},
                            csrf=secrets.token_urlsafe(32))
@@ -108,34 +108,15 @@ class NewJob(BaseModel):
 
 @app.post("/api/jobs", status_code=201)
 def submit(payload: NewJob, identity=Depends(csrf)):
-    job_id = uuid.uuid4()
-    with db() as conn:
-        conn.execute("INSERT INTO jobs(id, owner, title, body) VALUES (%s,%s,%s,%s)",
-                     (job_id, identity["id"], payload.title, payload.text))
-    # Postgres is the durable queue. Redis wake-ups are expendable; polling recovers misses.
-    try:
-        redis.lpush("jobs:wakeup", "1")
-        redis.ltrim("jobs:wakeup", 0, 999)
-    except Exception:
-        log.warning("Redis wake-up unavailable; worker will poll Postgres")
-    return {"id": str(job_id)}
+    return {"id": jobs.create_job(identity["id"], payload.title, payload.text)}
 
 @app.get("/api/jobs")
-def jobs(identity=Depends(user)):
-    with db() as conn:
-        rows = conn.execute("SELECT id,title,status,attempts,created_at,finished_at FROM jobs WHERE owner=%s ORDER BY created_at DESC LIMIT 50", (identity["id"],)).fetchall()
-    return {"jobs": rows}
+def list_jobs(identity=Depends(user)):
+    return {"jobs": jobs.list_jobs(identity["id"])}
 
 @app.get("/api/jobs/{job_id}/report")
 def report(job_id: uuid.UUID, identity=Depends(user)):
-    with db() as conn:
-        row = conn.execute("SELECT result_key FROM jobs WHERE id=%s AND owner=%s AND status='complete'", (job_id, identity["id"])).fetchone()
-    if not row:
+    data = jobs.read_report(identity["id"], job_id)
+    if data is None:
         raise HTTPException(404, "Report not found")
-    obj = storage().get_object(s.S3_BUCKET, row["result_key"])
-    try:
-        data = obj.read()
-    finally:
-        obj.close()
-        obj.release_conn()
     return Response(data, media_type="application/json", headers={"Content-Disposition": f'attachment; filename="report-{job_id}.json"'})
