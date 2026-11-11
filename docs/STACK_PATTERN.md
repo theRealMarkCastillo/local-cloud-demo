@@ -25,7 +25,7 @@ A changed database URL does not copy data, and a changed issuer does not migrate
 | Files / reports | Private MinIO bucket | S3 API and scoped cloud credentials |
 | Authentication / SSO | Keycloak using OIDC | Stable issuer; separate client per app/environment |
 | MCP tools | `mcp` service; Keycloak `mcp:tools` scope with audience `PUBLIC_URL/mcp` | Resource URL per MCP server; public PKCE client; no token passthrough; see `MCP.md` |
-| Outbound agent access | `gateway` (agentgateway) + `credentials`; Keycloak roles per agent client | Audience `PUBLIC_URL/gateway` mapped only on agent clients; token exchange for own services; connected accounts in the IdP; see `GATEWAY.md` |
+| Outbound agent access | `gateway` (agentgateway) + `credentials`; Keycloak roles per agent client | Audience `PUBLIC_URL/gateway` mapped only on agent clients; token exchange for own services; connected accounts in the IdP; agent-to-agent (A2A) calls exchange a token at every hop and are joined in the audit log by trace id; see `GATEWAY.md` |
 | Social login | Not configured | Keycloak brokering; see `SOCIAL_LOGIN.md` |
 | Secrets | Ignored local file; cloud secret settings | Inject at runtime into only the service that needs them |
 

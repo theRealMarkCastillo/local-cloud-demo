@@ -66,7 +66,11 @@ only the shared-key and LLM routes use a system credential. The `credentials` se
 only client mapped to Keycloak's `broker/read-token`, and the built-in `admin-cli` and
 `security-admin-console` clients lose full scope, so agents and browser sessions cannot
 read stored upstream tokens; those tokens are never logged, written to Redis or returned to
-an agent. The gateway, `credentials` and `stubs` publish no host ports. The API keeps the
+an agent. Agent-to-agent (A2A) calls go through the gateway too: the `reporter` agent accepts only
+tokens addressed to `reporter-agent`, never forwards a token it was given, and can do at
+most what `reporter-agent` is mapped (`workbench:read`); the calling agent's own limits do
+not carry past the first hop, and the hops of one request are joined by `trace.id` in the
+gateway log (no `act` claim). The gateway, `credentials`, `reporter` and `stubs` publish no host ports. The API keeps the
 user's own Keycloak access and refresh tokens in the server-side session for the Connections
 page and the sample agent; logout deletes them, and gateway tokens already issued stay valid
 for up to five minutes. See [GATEWAY.md](GATEWAY.md).

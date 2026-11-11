@@ -93,7 +93,7 @@ it as a private service and the optional Keycloak CIMD/resource-indicator featur
 
 ## Outbound gateway
 
-The Fly and Render definitions do not include `gateway`, `credentials` or `stubs`; the
+The Fly and Render definitions do not include `gateway`, `credentials`, `reporter` or `stubs`; the
 gateway is not deployed or runtime-tested in the cloud. A deployment would run `gateway`
 and `credentials` as private services, replace every `local-only-` secret, replace the
 `upstream-demo` stand-in with real providers, and keep the gateway's admin port private.

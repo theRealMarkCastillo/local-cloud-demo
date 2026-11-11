@@ -44,7 +44,7 @@ private MinIO bucket. Download it through the authenticated API. Reports and job
 lists are scoped to the OIDC issuer + subject of the signed-in user.
 
 ```sh
-make smoke                       # Real OIDC login, full job path, MCP tools, outbound gateway
+make smoke                       # Real OIDC login, full job path, MCP tools, outbound gateway, agent-to-agent
 make email-config                # Reapply local Keycloak/Mailpit settings
 make email-test                  # Send a synthetic message to local Mailpit
 make email-smoke                 # Verify account email/reset flow with a synthetic user
@@ -78,6 +78,9 @@ flowchart LR
   Cred --> KC
   GW --> KC
   GW --> Stubs[stubs: LLM, echo, Jira stand-ins]
+  GW --> Rep[reporter agent]
+  Rep --> GW
+  Rep --> KC
   API --> PG[(Postgres: records + durable queue)]
   API --> Redis[(Redis: sessions + wake-ups)]
   Worker --> PG
@@ -98,6 +101,7 @@ flowchart LR
 | mcp | MCP tools for the user's jobs/reports; Keycloak tokens for `PUBLIC_URL/mcp` | Same image, different command (not in cloud manifests) |
 | gateway | Outbound agent gateway (agentgateway): role checks, token exchange, shared keys, LLM budgets, audit log | Not in cloud manifests |
 | credentials | Hands the gateway each user's stored connected-account token | Same image, different command (not in cloud manifests) |
+| reporter | Second sample agent, called agent-to-agent (A2A) through the gateway; reads the user's jobs with its own exchanged token | Same image, different command (not in cloud manifests) |
 | stubs | Local stand-ins: fake LLM, echo, Jira-like MCP server | None; local only |
 | postgres | App data and durable job records | Neon with TLS |
 | redis | Server-side sessions and disposable job notifications | TLS Redis-compatible service |

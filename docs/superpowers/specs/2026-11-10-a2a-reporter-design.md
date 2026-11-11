@@ -221,3 +221,28 @@ A failed task is a normal step result for agent A, not an exception.
 - Agent discovery or a registry beyond one agent card per route.
 - Streaming, push notifications and long-running A2A tasks.
 - Per-skill authorization; the role check is per route.
+
+## Changes made during implementation
+
+Decisions taken while building, with the evidence in the plan ledger:
+
+- **Token limits (open check 2).** The reporter's hop-2 token carries the user's roles
+  limited to `reporter-agent`'s mapping only. The calling agent's limits do not reach
+  hop 2: the hop-1 token is issued to the `gateway` client and carries all of the user's
+  gateway roles. The calling agent is checked once, by `reporter:use`.
+- **Audit join.** The gateway rewrites the span id of `traceparent` and logs the trace id
+  natively as `trace.id`. The two hops are joined on `trace.id`, and no custom access-log
+  field was added.
+- **Calling-agent header.** Set with `transformations.request.set` on the route; it
+  replaces a client-supplied value.
+- **SDK.** `a2a-sdk` 1.3.0 is used (no fallback). It adds 16 packages to the backend
+  image, including `protobuf` and `google-api-core`. Finished tasks stay in the SDK's
+  in-memory task store until the reporter restarts, scoped per user.
+- **Shared client code.** The token exchange and MCP tool call moved from `agent.py`
+  into `backend/app/gateway_client.py`; `mcp_auth.from_settings` takes the audience and
+  scope as parameters.
+- **Reporter logging.** The reporter installs its own INFO log handler; uvicorn configures
+  only its own loggers.
+- **Smoke.** Five new PASS lines (28 in total); the no-ports check extends an existing
+  line. The token-limits check is gate evidence only.
+- **Agent step.** A 200 response without a task is shown as a failed step (502).

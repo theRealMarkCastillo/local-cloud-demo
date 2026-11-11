@@ -17,6 +17,8 @@ flowchart LR
   GW -- user's upstream token --> Jira[stubs: Jira-like MCP]
   GW -- shared system key --> Echo[stubs: echo]
   GW -- provider key + per-user budget --> LLM[stubs: fake LLM]
+  GW -- token exchange, user's identity --> Rep[reporter agent, A2A]
+  Rep -- its own exchanged token --> GW
 ```
 
 ## Routes and how identity reaches each service
@@ -27,6 +29,7 @@ flowchart LR
 | `/gateway/mcp/jira` | `jira:use` | The user's own connected-account token, read from Keycloak by the `credentials` service. |
 | `/gateway/echo/*` | `echo:use` | One shared system key held by the gateway. The user's token never reaches the service. |
 | `/gateway/llm/v1/*` | `llm:use` | The provider key held by the gateway. Each user has a budget of 1000 tokens per hour, shared across their agents. |
+| `/gateway/a2a/reporter` | `reporter:use` | A Keycloak token for `reporter-agent` with the user as `sub`, obtained by token exchange. See [Agent-to-agent](#agent-to-agent). |
 
 The exchanged token names the user and the gateway (`azp=gateway`), not the agent,
 and has no `act` claim: Keycloak's standard token exchange does not record a
@@ -97,8 +100,56 @@ Locally the outside service is the `upstream-demo` realm: sign in there as
 
 "Run agent" on the home page calls `POST /api/agent/run`. The API exchanges the
 user's server-side session token for a gateway token as `workbench-agent`, then
-asks the LLM, lists the user's jobs and calls the Jira stand-in, all through the
-gateway. The session cookie and the user's own tokens never leave the API.
+asks the LLM, lists the user's jobs, calls the Jira stand-in and asks the reporter
+agent for a report, all through the gateway. The session cookie and the user's own tokens never leave the API.
+
+## Agent-to-agent
+
+One agent can call another through the gateway on the user's behalf. The second
+sample agent is the **reporter** (`backend/app/reporter.py`, Compose service
+`reporter`, Keycloak client `reporter-agent`). It speaks the A2A protocol
+(`a2a-sdk`) and has one skill, `job_report`.
+
+1. The calling agent sends an A2A `SendMessage` to `/gateway/a2a/reporter` with its
+   gateway token. The gateway checks `reporter:use`, exchanges the token for one
+   addressed to `reporter-agent` (scope `agent:reporter`), and sets
+   `x-calling-agent` to the caller's client. A caller cannot forge that header.
+2. The reporter checks the token (issuer, audience `reporter-agent`, expiry), then
+   exchanges it as `reporter-agent` for a gateway token of its own.
+3. The reporter calls `/gateway/mcp/workbench` with that token. The existing route
+   exchanges once more for the MCP server, and `list_jobs` returns only the user's jobs.
+4. The reporter answers with a completed task such as `3 jobs: 2 complete, 1 queued`.
+   When it cannot act it answers with a failed task: `could not act for this user`
+   or `not allowed to read jobs`.
+
+The agent card is served at `/gateway/a2a/reporter/.well-known/agent-card.json`. It
+needs a gateway token, and the gateway rewrites the URL in it to this route, so
+callers never learn the reporter's own address.
+
+**What limits the reporter.** `reporter-agent` is mapped only `workbench:read`, so
+the reporter can read a user's jobs and can never write them. Its own mapping is the
+cap: the token it exchanges carries the user's roles limited to `reporter-agent`'s
+mapping, not also to the calling agent's. The calling agent is checked once, at the
+first hop, by `reporter:use`. Give a second agent only the roles it should have
+whoever calls it.
+
+**Rules for agents.** Never forward a token you were given; exchange it. Never fall
+back to a service account for a user's request.
+
+**Reading the chain from the audit log.** No token names an earlier hop, so the
+chain user → agent → reporter → tool is reconstructed from the gateway log. The
+gateway keeps the trace id of an incoming `traceparent` header and logs it as
+`trace.id`; the reporter forwards the header on its own call. One request leaves two
+lines with the same `trace.id` and user (`jwt.sub`):
+
+```bash
+docker compose logs gateway | grep 'trace.id=<32 hex digits>'
+```
+
+The first has `route=default/a2a-reporter` and `jwt.azp="workbench-agent"` (or
+`"agent-cli"`); the second has `route=default/mcp-workbench` and
+`jwt.azp="reporter-agent"`. The reporter also logs `sub`, the calling agent and the
+outcome.
 
 ## Using a real provider instead of the stand-in
 
@@ -133,4 +184,16 @@ keys must be uploaded again whenever Keycloak rotates them. Mapping
 
 - Issued gateway tokens stay valid for up to five minutes after logout.
 - Stand-in services (`stubs`, the `upstream-demo` realm) are local only.
-- No per-agent budgets, no persistent budgets, no delegation (`act`) claims.
+- No per-agent budgets and no persistent budgets.
+- No delegation (`act`) claims: the chain is in the audit log, not in the tokens.
+  Keycloak 26.8 has a preview feature, token exchange delegation, that writes an
+  `act` claim naming the acting client. It needs feature flags, a consent screen
+  per login session and fine-grained admin permissions, and it is one level deep:
+  a token that already carries `act` cannot be exchanged again, so it cannot
+  express user → agent → reporter. It is not enabled here. Nested `act` chains
+  need a token service that nests them.
+- The reporter is our own agent in the same realm. Agents from another
+  organisation or identity provider are not covered.
+- A2A calls block until the reporter answers: no streaming, push notifications or
+  long-running tasks. Finished tasks stay in the reporter's memory until it restarts.
+- Authorization on the A2A route is per route, not per skill.
