@@ -278,14 +278,16 @@ def gw_tool(path, token, session, name, arguments=None):
     status, _, payload = gw_rpc(path, token, session, "tools/call", {"name": name, "arguments": arguments or {}})
     return status, payload
 
-# Token budgets live in gateway memory; start each smoke run with fresh ones.
-subprocess.run(["docker", "compose", "restart", "gateway"], cwd=ROOT, check=True, capture_output=True)
-for attempt in range(30):
-    if gw("/echo/ready")[0] == 401:
-        break
-    time.sleep(1)
-else:
+def fresh_gateway():
+    # Token budgets live in gateway memory (one hour window); restart to start from full budgets.
+    subprocess.run(["docker", "compose", "restart", "gateway"], cwd=ROOT, check=True, capture_output=True)
+    for attempt in range(30):
+        if gw("/echo/ready")[0] == 401:
+            return
+        time.sleep(1)
     raise AssertionError("Gateway did not come back after restart")
+
+fresh_gateway()
 assert gw("/mcp/workbench", None, {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}})[0] == 401
 assert gw("/echo/x", demo_token)[0] == 401, "A token minted for /mcp must not open the gateway"
 mcp_claims = json.loads(base64.urlsafe_b64decode(demo_token.split(".")[1] + "=="))
@@ -339,3 +341,82 @@ for port in (15000, 3000):
     except (urllib.error.URLError, OSError):
         pass
 print("PASS: gateway internals are not reachable from the host")
+
+# --- Connected accounts and the in-stack agent ---
+class AnyForm(HTMLParser):
+    """First form on a Keycloak page: the link confirmation or a login form."""
+    def __init__(self):
+        super().__init__()
+        self.action, self.fields, self.done = None, {}, False
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        if tag == "form" and self.action is None:
+            self.action = attrs.get("action")
+        elif tag == "input" and self.action and not self.done and attrs.get("name"):
+            self.fields.setdefault(attrs["name"], attrs.get("value") or "")
+    def handle_endtag(self, tag):
+        if tag == "form" and self.action:
+            self.done = True
+
+def follow_forms(opener, url, username, password):
+    """Submit Keycloak pages until one without a form is reached; returns its URL."""
+    response = opener.open(url, timeout=20)
+    for step in range(6):
+        page = AnyForm(); page.feed(response.read().decode())
+        if not page.action:
+            return response.url
+        fields = dict(page.fields)
+        if "password" in fields or "username" in fields:
+            fields.update(username=username, password=password)
+        response = opener.open(page.action, data=urllib.parse.urlencode(fields).encode(), timeout=20)
+    raise AssertionError("Account linking did not finish")
+
+def jira(token):
+    """whoami through the gateway's connected-account route: (status, body)."""
+    status, headers, payload = gw("/mcp/jira", token, {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+        "protocolVersion": PROTOCOL, "capabilities": {}, "clientInfo": {"name": "smoke", "version": "1"}}})
+    if status != 200:
+        return status, payload
+    session = headers.get("Mcp-Session-Id")
+    gw("/mcp/jira", token, {"jsonrpc": "2.0", "method": "notifications/initialized"}, session)
+    return gw_tool("/mcp/jira", token, session, "whoami")
+
+def connected(state):
+    return {item["alias"]: item["connected"] for item in state["connections"]}
+
+demo_browser = client(); demo_me = login(demo_browser)
+if connected(fetch(demo_browser, "/api/connections"))["upstream-demo"]:
+    fetch(demo_browser, "/api/connections/upstream-demo", "DELETE", token=demo_me["csrf"])  # leftover from an earlier run
+agent_demo = pkce_token("agent-cli", "demo")
+status, body = jira(agent_demo)
+assert status == 403 and body["error"] == "account_not_connected", (status, body)
+assert body["connect_url"] == BASE + "/connections.html?service=upstream-demo", body
+print("PASS: Jira route asks for a connection before linking")
+fetch(demo_browser, "/api/connections/upstream-demo/connect", "POST", expected=403)
+started = fetch(demo_browser, "/api/connections/upstream-demo/connect", "POST", token=demo_me["csrf"])
+landed = follow_forms(demo_browser, started["redirect"], "demo-upstream", os.getenv("DEMO_PASSWORD", "demo-password"))
+assert landed == BASE + "/connections.html?status=success", landed
+assert connected(fetch(demo_browser, "/api/connections"))["upstream-demo"] is True
+status, body = jira(agent_demo)
+assert status == 200 and body["result"]["structuredContent"] == {"upstream_user": "demo-upstream"}, (status, body)
+print("PASS: linking through upstream-demo gives the Jira stub the upstream user")
+other_browser = client(); login(other_browser, "demo-other")
+assert connected(fetch(other_browser, "/api/connections"))["upstream-demo"] is False
+assert jira(pkce_token("agent-cli", "demo-other"))[0] == 403
+print("PASS: another user stays unconnected")
+fresh_gateway()
+fetch(demo_browser, "/api/agent/run", "POST", expected=403)
+ran = fetch(demo_browser, "/api/agent/run", "POST", token=demo_me["csrf"])
+assert [(step["step"], step["status"]) for step in ran["steps"]] == [("llm", 200), ("list_jobs", 200), ("jira", 200)], ran
+assert ran["steps"][2]["detail"] == "demo-upstream", ran
+demo_sub = json.loads(base64.urlsafe_b64decode(agent_demo.split(".")[1] + "=="))["sub"]
+audit = subprocess.run(["docker", "compose", "logs", "--since", "2m", "gateway"], cwd=ROOT, check=True,
+                       capture_output=True, text=True).stdout
+assert any("workbench-agent" in line and demo_sub in line and "mcp-jira" in line for line in audit.splitlines()), \
+    "Gateway audit log lacks the in-stack agent acting for demo"
+assert agent_demo not in audit, "Tokens must not reach the gateway log"
+print("PASS: in-stack agent runs through the gateway with CSRF")
+fetch(demo_browser, "/api/connections/upstream-demo", "DELETE", token=demo_me["csrf"])
+status, body = jira(agent_demo)
+assert status == 403 and body["error"] == "account_not_connected", (status, body)
+print("PASS: disconnect removes the stored upstream token")
