@@ -125,6 +125,19 @@ services:
       interval: 10s
       timeout: 8s
       retries: 12
+  # Second sample agent, reached agent-to-agent through the gateway. Internal only.
+  reporter:
+    <<: *app
+    command: ['uvicorn', 'app.reporter:app', '--host', '0.0.0.0', '--port', '8000', '--no-proxy-headers', '--no-access-log']
+    environment:
+      <<: *app-env
+      OIDC_ISSUER_URL: ${PUBLIC_URL:-http://localhost:8080}/identity/realms/workbench
+      OIDC_INTERNAL_URL: http://keycloak:8080/identity/realms/workbench
+      REPORTER_AGENT_SECRET: ${REPORTER_AGENT_SECRET:-local-only-reporter-secret}
+    depends_on:
+      keycloak:
+        condition: service_healthy
+    healthcheck: *http-health
   # Local stand-ins only (fake LLM, echo, Jira-like MCP server). Not part of any cloud definition.
   stubs:
     <<: *app

@@ -55,7 +55,7 @@ def jwks_client(uri: str) -> jwt.PyJWKClient:
     return jwt.PyJWKClient(uri, cache_jwk_set=True, lifespan=300, cache_keys=False, timeout=10)
 
 
-def from_settings() -> KeycloakTokenVerifier:
+def from_settings(audience: str = s.MCP_RESOURCE_URL, scope: str | None = s.MCP_SCOPE) -> KeycloakTokenVerifier:
     """Discover the JWKS URL on the internal issuer address, mirroring the browser API."""
     issuer, internal = s.required("OIDC_ISSUER_URL").rstrip("/"), s.OIDC_INTERNAL_URL
     response = httpx.get(internal + "/.well-known/openid-configuration", timeout=15)
@@ -64,4 +64,4 @@ def from_settings() -> KeycloakTokenVerifier:
     if metadata["issuer"] != issuer:
         raise RuntimeError("OIDC discovery issuer mismatch")
     jwks_uri = metadata["jwks_uri"].replace(issuer, internal, 1)
-    return KeycloakTokenVerifier(issuer, s.MCP_RESOURCE_URL, s.MCP_SCOPE, jwks_client(jwks_uri))
+    return KeycloakTokenVerifier(issuer, audience, scope, jwks_client(jwks_uri))

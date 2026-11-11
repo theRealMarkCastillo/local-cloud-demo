@@ -9,6 +9,9 @@ services:
   credentials:
     volumes: ['./backend/app:/srv/app:ro']
     command: ['uvicorn', 'app.credentials:app', '--host', '0.0.0.0', '--port', '8000', '--reload', '--no-proxy-headers', '--no-access-log']
+  reporter:
+    volumes: ['./backend/app:/srv/app:ro']
+    command: ['uvicorn', 'app.reporter:app', '--host', '0.0.0.0', '--port', '8000', '--reload', '--no-proxy-headers', '--no-access-log']
   stubs:
     volumes: ['./backend/app:/srv/app:ro']
     command: ['uvicorn', 'app.stubs:app', '--host', '0.0.0.0', '--port', '8000', '--reload', '--no-proxy-headers', '--no-access-log']
