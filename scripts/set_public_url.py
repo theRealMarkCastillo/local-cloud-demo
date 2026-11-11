@@ -34,6 +34,8 @@ try:
         "-s", "webOrigins=" + json.dumps([url]), "--config", "/tmp/workbench-admin.config")
 finally:
     run("docker", "compose", "exec", "-T", "keycloak", "rm", "-f", "/tmp/workbench-admin.config")
+# The MCP token audience is PUBLIC_URL + "/mcp"; services read PUBLIC_URL at start.
+run(sys.executable, str(p / "scripts" / "configure_mcp.py"))
 run("docker", "compose", "exec", "-T", "redis", "redis-cli", "EVAL",
     "local ks=redis.call('keys','session:*'); local fs=redis.call('keys','session-family:*'); for _,k in ipairs(fs) do table.insert(ks,k) end; for _,k in ipairs(ks) do redis.call('del',k) end; return #ks", "0")
 print("Local origin and Keycloak callback updated:", url)

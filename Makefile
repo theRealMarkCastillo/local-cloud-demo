@@ -2,9 +2,11 @@
 up:
 	docker compose up --build -d --wait
 	python3 scripts/configure_email.py
+	python3 scripts/configure_mcp.py
 dev:
 	docker compose -f compose.yaml -f compose.dev.yaml up --build -d --wait
 	python3 scripts/configure_email.py
+	python3 scripts/configure_mcp.py
 down:
 	docker compose down
 logs:
