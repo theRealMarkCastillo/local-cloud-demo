@@ -13,6 +13,11 @@ DATABASE_URL = required("DATABASE_URL")
 REDIS_URL = required("REDIS_URL")
 OIDC_ISSUER_URL = os.getenv("OIDC_ISSUER_URL", "").rstrip("/")
 OIDC_INTERNAL_URL = os.getenv("OIDC_INTERNAL_URL", OIDC_ISSUER_URL).rstrip("/")
+TOKEN_URL = OIDC_INTERNAL_URL + "/protocol/openid-connect/token"
+# In-stack agent: its own confidential client, and the internal addresses it calls.
+WORKBENCH_AGENT_SECRET = os.getenv("WORKBENCH_AGENT_SECRET", "")
+GATEWAY_INTERNAL_URL = os.getenv("GATEWAY_INTERNAL_URL", "http://gateway:3000").rstrip("/")
+CREDENTIALS_INTERNAL_URL = os.getenv("CREDENTIALS_INTERNAL_URL", "http://credentials:8000").rstrip("/")
 # Keycloak account API (linked accounts), called with the user's own token.
 ACCOUNT_URL = OIDC_INTERNAL_URL + "/account"
 OIDC_CLIENT_ID = os.getenv("OIDC_CLIENT_ID", "")

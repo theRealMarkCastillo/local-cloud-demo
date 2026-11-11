@@ -53,6 +53,7 @@ services:
       OIDC_INTERNAL_URL: http://keycloak:8080/identity/realms/workbench
       OIDC_CLIENT_ID: workbench
       OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-local-only-oidc-secret}
+      WORKBENCH_AGENT_SECRET: ${WORKBENCH_AGENT_SECRET:-local-only-agent-secret}
     depends_on:
       init:
         condition: service_completed_successfully

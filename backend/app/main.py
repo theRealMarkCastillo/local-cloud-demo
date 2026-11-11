@@ -9,7 +9,7 @@ from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel, Field
 from app import settings as s
-from app import connections, jobs, user_tokens
+from app import agent, connections, jobs, user_tokens
 from app.identity import owner_id
 from app.services import db, redis
 from app.session import ServerSessionMiddleware
@@ -163,7 +163,22 @@ async def link_callback(request: Request, identity=Depends(user)):
 async def disconnect(request: Request, alias: str = Depends(known_alias), identity=Depends(csrf)):
     # Keycloak drops the stored upstream token together with the link.
     await account_api(request, "DELETE", "/linked-accounts/" + alias)
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            await agent.evict_credentials(await keycloak_token(request), alias, client)
+    except (httpx.HTTPError, user_tokens.SignInRequired):
+        # The link is gone either way; the cached copy expires within a minute on its own.
+        log.warning("Could not evict the cached upstream token after disconnect")
     return {"ok": True}
+
+@app.post("/api/agent/run")
+async def run_agent(request: Request, identity=Depends(csrf)):
+    token = await keycloak_token(request)
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            return await agent.run(token, client)
+    except httpx.HTTPError:
+        raise HTTPException(502, "The gateway could not be reached")
 
 class NewJob(BaseModel):
     title: str = Field(min_length=1, max_length=120)
