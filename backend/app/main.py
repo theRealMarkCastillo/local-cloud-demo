@@ -42,6 +42,8 @@ app.add_middleware(ServerSessionMiddleware)
 
 @app.exception_handler(user_tokens.SignInRequired)
 async def sign_in_required(request: Request, error: user_tokens.SignInRequired):
+    # The Keycloak session is over: drop the stored tokens so nothing keeps using them.
+    request.session.pop("tokens", None)
     return JSONResponse({"detail": "Sign in again"}, status_code=401)
 
 def user(request: Request):
@@ -125,6 +127,8 @@ async def account_api(request: Request, method: str, path: str) -> httpx.Respons
     async with httpx.AsyncClient(timeout=15) as client:
         response = await client.request(method, s.ACCOUNT_URL + path, headers={
             "Authorization": "Bearer " + token, "Accept": "application/json"})
+    if response.status_code == 401:
+        raise user_tokens.SignInRequired()
     if response.status_code >= 400:
         log.warning("Keycloak account API %s %s returned %s", method, path, response.status_code)
         raise HTTPException(502, "Identity provider request failed")

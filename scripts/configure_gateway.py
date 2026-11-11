@@ -75,6 +75,10 @@ def desired(public, secret):
         {"clientId": "workbench", "fullScopeAllowed": False,
          "redirectUris": [public + "/auth/callback", public + "/auth/link-callback"],
          "protocolMappers": [audience("workbench-agent-audience", "workbench-agent")]},
+        # Built-in clients default to full scope; users hold broker/read-token, so these would otherwise
+        # carry it into tokens that can read stored upstream tokens.
+        {"clientId": "admin-cli", "fullScopeAllowed": False},
+        {"clientId": "security-admin-console", "fullScopeAllowed": False},
     ]
     scope_mappings = {
         "agent-cli": ["llm:use", "workbench:read", "jira:use", "echo:use"],

@@ -2,6 +2,7 @@
 import json
 import secrets
 import unittest
+from unittest.mock import patch
 import httpx
 from app import connections, main
 from app import settings as s
@@ -79,6 +80,23 @@ class EndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(redis.get(self.key))
         leftovers = [k for k in redis.scan_iter("session:*") if "synthetic-refresh" in (redis.get(k) or "")]
         self.assertEqual(leftovers, [])
+
+    async def test_account_api_401_clears_tokens_and_asks_to_sign_in(self):
+        # Keycloak session ended while the stored access token is still unexpired.
+        real = httpx.AsyncClient
+        rejecting = lambda **kw: real(transport=httpx.MockTransport(lambda r: httpx.Response(401)), **kw)
+        with patch.object(main.httpx, "AsyncClient", rejecting):
+            response = await self.http.get("/api/connections")
+        self.assertEqual(response.status_code, 401)
+        self.assertNotIn("synthetic-refresh", redis.get(self.key))
+
+    async def test_agent_sign_in_required_clears_tokens(self):
+        async def ended(token, client):
+            raise main.user_tokens.SignInRequired()
+        with patch.object(main.agent, "run", ended):
+            response = await self.http.post("/api/agent/run", headers=self.csrf)
+        self.assertEqual(response.status_code, 401)
+        self.assertNotIn("synthetic-refresh", redis.get(self.key))
 
 
 if __name__ == "__main__":

@@ -27,6 +27,13 @@ class DesiredTests(unittest.TestCase):
         for name in names:
             self.assertIs(client(state, name)["fullScopeAllowed"], False, name)
 
+    def test_builtin_full_scope_clients_are_restricted(self):
+        # Users hold broker/read-token, so any full-scope client would carry it into a token that can
+        # read the stored upstream tokens; only gateway-credentials may.
+        state = desired()
+        for name in ("admin-cli", "security-admin-console"):
+            self.assertIs(client(state, name)["fullScopeAllowed"], False, name)
+
     def test_only_credentials_client_maps_read_token(self):
         mappings = desired()["scope_mappings"]
         holders = [name for name, roles in mappings.items() if "broker/read-token" in roles]

@@ -63,7 +63,8 @@ which only registered agent clients map, and checks a Keycloak role for each rou
 carry the roles the user holds and the agent is mapped to, nothing more. Downstream services
 receive the user's identity through token exchange or the user's own connected-account token;
 only the shared-key and LLM routes use a system credential. The `credentials` service is the
-only client mapped to Keycloak's `broker/read-token`, so agents and browser sessions cannot
+only client mapped to Keycloak's `broker/read-token`, and the built-in `admin-cli` and
+`security-admin-console` clients lose full scope, so agents and browser sessions cannot
 read stored upstream tokens; those tokens are never logged, written to Redis or returned to
 an agent. The gateway, `credentials` and `stubs` publish no host ports. The API keeps the
 user's own Keycloak access and refresh tokens in the server-side session for the Connections

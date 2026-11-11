@@ -71,7 +71,9 @@ provider (`upstream-demo` locally) and refreshes them when read.
    `credentials` exchanges the agent's token for one that carries
    `broker/read-token`, reads the stored token from Keycloak and returns it as the
    upstream `Authorization` header. Only the `gateway-credentials` client is mapped
-   to `read-token`, so agents and browser sessions can never read stored tokens.
+   to `read-token`, and `configure_gateway.py` turns off full scope on the built-in
+   `admin-cli` and `security-admin-console` clients, so agents and browser sessions
+   can never read stored tokens.
 3. `credentials` caches a token per user and service in process memory for at most
    60 seconds, and never past 30 seconds before it expires.
 4. Disconnect unlinks the account in Keycloak and evicts the cached token, so it

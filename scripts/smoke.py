@@ -400,6 +400,16 @@ assert connected(fetch(demo_browser, "/api/connections"))["upstream-demo"] is Tr
 status, body = jira(agent_demo)
 assert status == 200 and body["result"]["structuredContent"] == {"upstream_user": "demo-upstream"}, (status, body)
 print("PASS: linking through upstream-demo gives the Jira stub the upstream user")
+password_grant = json.load(urllib.request.urlopen(urllib.request.Request(
+    oidc["token_endpoint"], data=urllib.parse.urlencode({"grant_type": "password", "client_id": "admin-cli", "username": "demo",
+    "password": os.getenv("DEMO_PASSWORD", "demo-password")}).encode()), timeout=20, context=TLS))["access_token"]
+try:
+    urllib.request.urlopen(urllib.request.Request(issuer + "/broker/upstream-demo/token",
+                           headers={"Authorization": "Bearer " + password_grant}), timeout=20, context=TLS)
+    raise AssertionError("A built-in client token read the stored upstream token")
+except urllib.error.HTTPError as error:
+    assert error.code == 403, error.code
+print("PASS: only gateway-credentials can read stored upstream tokens")
 other_browser = client(); login(other_browser, "demo-other")
 assert connected(fetch(other_browser, "/api/connections"))["upstream-demo"] is False
 assert jira(pkce_token("agent-cli", "demo-other"))[0] == 403
