@@ -33,8 +33,8 @@ def token(sub="demo", aud="reporter-agent", **extra):
 class Gateway:
     """Mock Keycloak token endpoint and the gateway's workbench MCP route. Job counts differ per user."""
 
-    def __init__(self, exchange_status=200, tool_status=200, jobs=None, fail=None):
-        self.exchange_status, self.tool_status, self.fail = exchange_status, tool_status, fail
+    def __init__(self, exchange_status=200, tool_status=200, jobs=None, fail=None, delay=0.01):
+        self.exchange_status, self.tool_status, self.fail, self.delay = exchange_status, tool_status, fail, delay
         self.jobs = jobs or {"demo": [{"status": "complete"}, {"status": "complete"}]}
         self.requests = []
 
@@ -58,7 +58,7 @@ class Gateway:
             return httpx.Response(202)
         if self.tool_status != 200:
             return httpx.Response(self.tool_status, text="authorization failed")
-        await asyncio.sleep(0.01)
+        await asyncio.sleep(self.delay)
         result = {"structuredContent": {"jobs": self.jobs.get(sub, [])}, "isError": False}
         return httpx.Response(200, json={"jsonrpc": "2.0", "id": 2, "result": result})
 
@@ -98,6 +98,11 @@ class SummariseTests(unittest.TestCase):
     def test_summarise_zero_and_one(self):
         self.assertEqual(reporter.summarise([]), "0 jobs")
         self.assertEqual(reporter.summarise([{"status": "queued"}]), "1 job: 1 queued")
+
+    def test_summarise_says_when_the_list_is_capped(self):
+        # list_jobs returns at most the 50 most recent jobs; the report must not present that as the total.
+        self.assertEqual(reporter.summarise([{"status": "complete"}] * 50), "latest 50 jobs: 50 complete")
+        self.assertEqual(reporter.summarise([{"status": "complete"}] * 49), "49 jobs: 49 complete")
 
 
 class ReporterTests(unittest.IsolatedAsyncioTestCase):
@@ -151,6 +156,43 @@ class ReporterTests(unittest.IsolatedAsyncioTestCase):
             response = await send(http, token())
         self.assertEqual(response.status_code, 200)
         self.assertEqual(outcome(response), ("TASK_STATE_FAILED", "could not act for this user"))
+
+    async def test_slow_gateway_ends_as_a_failed_task_within_the_budget(self):
+        # Four sequential requests each have their own timeout; the whole report has one budget.
+        original, reporter.BUDGET_SECONDS = reporter.BUDGET_SECONDS, 0.05
+        self.addCleanup(setattr, reporter, "BUDGET_SECONDS", original)
+        async with build(Gateway(delay=1)) as http:
+            started = time.monotonic()
+            response = await send(http, token())
+        self.assertLess(time.monotonic() - started, 0.8)
+        self.assertEqual(outcome(response), ("TASK_STATE_FAILED", "could not act for this user"))
+
+    async def test_gateway_outage_is_not_reported_as_a_denial(self):
+        with self.assertLogs("reporter", level="INFO") as logs:
+            async with build(Gateway(tool_status=503)) as http:
+                response = await send(http, token())
+        self.assertEqual(outcome(response), ("TASK_STATE_FAILED", "could not act for this user"))
+        self.assertIn("outcome=unreachable", "\n".join(logs.output))
+
+    async def test_another_user_cannot_read_or_continue_a_task(self):
+        # Finished tasks hold the user's report; the A2A handler must scope them to the token's user.
+        def rpc(method, params):
+            return {"jsonrpc": "2.0", "id": "1", "method": method, "params": params}
+        async with build(Gateway()) as http:
+            task_id = (await send(http, token(sub="demo"))).json()["result"]["task"]["id"]
+            mine = {"Authorization": "Bearer " + token(sub="demo"), "A2A-Version": "1.0"}
+            theirs = {"Authorization": "Bearer " + token(sub="other"), "A2A-Version": "1.0"}
+            own = (await http.post("/", json=rpc("GetTask", {"id": task_id}), headers=mine)).json()
+            self.assertEqual(own["result"]["id"], task_id)
+            stolen = (await http.post("/", json=rpc("GetTask", {"id": task_id}), headers=theirs)).json()
+            self.assertIn("error", stolen)
+            self.assertNotIn("2 jobs", json.dumps(stolen))
+            listed = (await http.post("/", json=rpc("ListTasks", {}), headers=theirs)).json()
+            self.assertEqual(listed["result"].get("tasks", []), [])
+            follow_up = message()
+            follow_up["params"]["message"]["taskId"] = task_id
+            continued = (await http.post("/", json=follow_up, headers=theirs)).json()
+            self.assertIn("error", continued)
 
     async def test_traceparent_forwarded_only_when_well_formed(self):
         gateway = Gateway()

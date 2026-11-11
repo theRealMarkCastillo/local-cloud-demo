@@ -362,10 +362,13 @@ status, _, card = gw(A2A + "/.well-known/agent-card.json", agent_demo)
 assert status == 200 and [skill["id"] for skill in card["skills"]] == ["job_report"], card
 assert card["supportedInterfaces"][0]["url"].startswith(GATEWAY + A2A), card["supportedInterfaces"]
 print("PASS: agent card is served through the gateway with its URL rewritten")
+def report_prefix(count):
+    return ("latest " if count >= 50 else "") + f"{count} job"  # list_jobs returns at most the 50 most recent
+
 status, reported = a2a(agent_demo)
-assert status == 200 and report_text(reported).startswith(f"{len(demo_ids)} job"), (status, reported, len(demo_ids))
+assert status == 200 and report_text(reported).startswith(report_prefix(len(demo_ids))), (status, reported, len(demo_ids))
 status, reported = a2a(agent_other)
-assert status == 200 and report_text(reported).startswith(f"{len(other_ids)} job"), (status, reported, len(other_ids))
+assert status == 200 and report_text(reported).startswith(report_prefix(len(other_ids))), (status, reported, len(other_ids))
 print("PASS: reporter reads only the calling user's jobs")
 for_reporter = exchanged("gateway", local_env("GATEWAY_CLIENT_SECRET", "local-only-gateway-secret"), agent_demo, "agent:reporter")
 as_reporter = exchanged("reporter-agent", local_env("REPORTER_AGENT_SECRET", "local-only-reporter-secret"), for_reporter)
@@ -484,7 +487,7 @@ ran = fetch(demo_browser, "/api/agent/run", "POST", token=demo_me["csrf"])
 assert [(step["step"], step["status"]) for step in ran["steps"]] == [
     ("llm", 200), ("list_jobs", 200), ("jira", 200), ("reporter", 200)], ran
 assert ran["steps"][2]["detail"] == "demo-upstream", ran
-assert ran["steps"][3]["detail"].startswith(ran["steps"][1]["detail"].split()[0] + " job"), ran  # same count, read by the reporter
+assert ran["steps"][1]["detail"].split()[0] + " job" in ran["steps"][3]["detail"], ran  # same count, read by the reporter
 demo_sub = json.loads(base64.urlsafe_b64decode(agent_demo.split(".")[1] + "=="))["sub"]
 audit = subprocess.run(["docker", "compose", "logs", "--since", "2m", "gateway"], cwd=ROOT, check=True,
                        capture_output=True, text=True).stdout

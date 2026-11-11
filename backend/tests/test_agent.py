@@ -50,6 +50,8 @@ class Gateway:
         return httpx.Response(200, text=f"event: message\ndata: {event}\n\n", headers={"Content-Type": "text/event-stream"})
 
     def reporter_reply(self) -> httpx.Response:
+        if self.reporter == "timeout":
+            raise httpx.ReadTimeout("simulated")
         if isinstance(self.reporter, int):
             return httpx.Response(self.reporter, text="authorization failed")
         if self.reporter == "failed":
@@ -93,6 +95,13 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         async with Gateway(reporter="failed").client() as http:
             result = await agent.run("user-token", http)
         self.assertEqual(result["steps"][3], {"step": "reporter", "status": 502, "detail": "not allowed to read jobs"})
+        self.assertEqual([step["status"] for step in result["steps"][:3]], [200, 200, 200])
+
+    async def test_reporter_timeout_is_a_step_result(self):
+        # The earlier steps' results must survive a reporter that does not answer in time.
+        async with Gateway(reporter="timeout").client() as http:
+            result = await agent.run("user-token", http)
+        self.assertEqual(result["steps"][3], {"step": "reporter", "status": 502, "detail": "failed"})
         self.assertEqual([step["status"] for step in result["steps"][:3]], [200, 200, 200])
 
     async def test_reporter_forbidden_is_a_step_result(self):

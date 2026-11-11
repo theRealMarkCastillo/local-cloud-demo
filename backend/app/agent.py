@@ -28,11 +28,15 @@ async def ask_reporter(http: httpx.AsyncClient, token: str) -> dict:
     """Agent to agent: ask the reporter, through the gateway, for a report on the user's jobs."""
     # A fresh trace id lets the gateway's two audit lines (this hop and the reporter's own call) be joined.
     traceparent = f"00-{secrets.token_hex(16)}-{secrets.token_hex(8)}-01"
-    response = await http.post(
-        s.GATEWAY_INTERNAL_URL + "/gateway/a2a/reporter",
-        headers={"Authorization": "Bearer " + token, "A2A-Version": "1.0", "traceparent": traceparent},
-        json={"jsonrpc": "2.0", "id": "1", "method": "SendMessage", "params": {"message": {
-            "role": "ROLE_USER", "messageId": secrets.token_hex(8), "parts": [{"text": "Report on my jobs"}]}}})
+    try:
+        response = await http.post(
+            s.GATEWAY_INTERNAL_URL + "/gateway/a2a/reporter",
+            headers={"Authorization": "Bearer " + token, "A2A-Version": "1.0", "traceparent": traceparent},
+            json={"jsonrpc": "2.0", "id": "1", "method": "SendMessage", "params": {"message": {
+                "role": "ROLE_USER", "messageId": secrets.token_hex(8), "parts": [{"text": "Report on my jobs"}]}}})
+    except httpx.HTTPError:
+        # The reporter is the last, slowest step (two hops); keep the earlier steps' results.
+        return {"step": "reporter", "status": 502, "detail": "failed"}
     task = (payload(response).get("result") or {}).get("task") or {} if response.status_code == 200 else {}
     if not task:
         return {"step": "reporter", "status": response.status_code if response.status_code != 200 else 502, "detail": "failed"}

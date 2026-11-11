@@ -3,6 +3,7 @@
 It reports on the calling user's jobs. It never forwards the token it was given: it exchanges that token for
 one of its own, limited to what `reporter-agent` may do for the user, and calls the workbench MCP server
 through the gateway with it."""
+import asyncio
 import logging
 import re
 from collections import Counter
@@ -26,6 +27,8 @@ from app.gateway_client import call_tool, exchange
 
 log = logging.getLogger("reporter")
 AUDIENCE = s.REPORTER_CLIENT_ID
+BUDGET_SECONDS = 20  # for the whole report; the calling agent waits 30 s
+LIST_LIMIT = 50  # list_jobs returns at most this many, newest first
 TRACEPARENT = re.compile(r"[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}")
 CARD = AgentCard(
     name="Workbench reporter", description="Reports on the signed-in user's jobs.", version="1",
@@ -49,26 +52,33 @@ def summarise(jobs: list[dict]) -> str:
         return "0 jobs"
     counts = Counter(str(job.get("status", "unknown")) for job in jobs)
     noun = "job" if len(jobs) == 1 else "jobs"
-    return f"{len(jobs)} {noun}: " + ", ".join(f"{counts[status]} {status}" for status in sorted(counts))
+    latest = "latest " if len(jobs) >= LIST_LIMIT else ""  # a full page is not a total
+    return f"{latest}{len(jobs)} {noun}: " + ", ".join(f"{counts[status]} {status}" for status in sorted(counts))
 
 
 async def job_report(token: str, traceparent: str | None, http: httpx.AsyncClient) -> str:
     """Exchange the incoming token for the reporter's own gateway token, list the user's jobs and summarise them."""
     extra = {"traceparent": traceparent} if traceparent and TRACEPARENT.fullmatch(traceparent) else None
     try:
-        exchanged = await exchange(http, AUDIENCE, s.required("REPORTER_AGENT_SECRET"), token)
-        if exchanged.status_code != 200:
-            log.warning("reporter token exchange returned %s", exchanged.status_code)
-            raise ReportError("could not act for this user", "exchange_refused")
-        status, body = await call_tool(http, exchanged.json()["access_token"], "/gateway/mcp/workbench", "list_jobs",
-                                       client_name=AUDIENCE, extra_headers=extra)
-    except httpx.HTTPError as error:
+        async with asyncio.timeout(BUDGET_SECONDS):
+            exchanged = await exchange(http, AUDIENCE, s.required("REPORTER_AGENT_SECRET"), token)
+            if exchanged.status_code != 200:
+                log.warning("reporter token exchange returned %s", exchanged.status_code)
+                raise ReportError("could not act for this user", "exchange_refused")
+            status, body = await call_tool(http, exchanged.json()["access_token"], "/gateway/mcp/workbench", "list_jobs",
+                                           client_name=AUDIENCE, extra_headers=extra)
+    except (httpx.HTTPError, TimeoutError) as error:
         log.warning("reporter could not reach Keycloak or the gateway: %s", type(error).__name__)
         raise ReportError("could not act for this user", "unreachable") from None
-    result = body.get("result", {}) if isinstance(body, dict) else {}
-    if status != 200 or result.get("isError") or "structuredContent" not in result:
+    result = body.get("result") if isinstance(body, dict) else None
+    if status == 200 and isinstance(result, dict) and "structuredContent" in result and not result.get("isError"):
+        return summarise(result["structuredContent"].get("jobs", []))
+    refused = status in (401, 403) or (status == 200 and isinstance(body, dict) and ("error" in body or result))
+    if refused:
         raise ReportError("not allowed to read jobs", "denied")
-    return summarise(result["structuredContent"].get("jobs", []))
+    # Anything else (5xx, rate limit, an empty answer) is an outage, not a permission problem.
+    log.warning("reporter list_jobs call returned %s", status)
+    raise ReportError("could not act for this user", "unreachable")
 
 
 class Reporter(AgentExecutor):

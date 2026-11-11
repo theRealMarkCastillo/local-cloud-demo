@@ -118,7 +118,8 @@ sample agent is the **reporter** (`backend/app/reporter.py`, Compose service
    exchanges it as `reporter-agent` for a gateway token of its own.
 3. The reporter calls `/gateway/mcp/workbench` with that token. The existing route
    exchanges once more for the MCP server, and `list_jobs` returns only the user's jobs.
-4. The reporter answers with a completed task such as `3 jobs: 2 complete, 1 queued`.
+4. The reporter answers with a completed task such as `3 jobs: 2 complete, 1 queued`
+   (`latest 50 jobs: …` when the list is full, since `list_jobs` returns at most 50).
    When it cannot act it answers with a failed task: `could not act for this user`
    or `not allowed to read jobs`.
 
@@ -139,16 +140,16 @@ back to a service account for a user's request.
 **Reading the chain from the audit log.** No token names an earlier hop, so the
 chain user → agent → reporter → tool is reconstructed from the gateway log. The
 gateway keeps the trace id of an incoming `traceparent` header and logs it as
-`trace.id`; the reporter forwards the header on its own call. One request leaves two
-lines with the same `trace.id` and user (`jwt.sub`):
+`trace.id`; the reporter forwards the header on its own call. One request leaves lines
+from both routes with the same `trace.id` and user (`jwt.sub`):
 
 ```bash
 docker compose logs gateway | grep 'trace.id=<32 hex digits>'
 ```
 
-The first has `route=default/a2a-reporter` and `jwt.azp="workbench-agent"` (or
-`"agent-cli"`); the second has `route=default/mcp-workbench` and
-`jwt.azp="reporter-agent"`. The reporter also logs `sub`, the calling agent and the
+One line has `route=default/a2a-reporter` and `jwt.azp="workbench-agent"` (or
+`"agent-cli"`); the others (one per MCP request) have `route=default/mcp-workbench`
+and `jwt.azp="reporter-agent"`. The reporter also logs `sub`, the calling agent and the
 outcome.
 
 ## Using a real provider instead of the stand-in
