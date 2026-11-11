@@ -145,6 +145,27 @@ class CheckTests(unittest.IsolatedAsyncioTestCase):
         async with client(build(Keycloak(broker_status=500))) as c:
             self.assertEqual((await c.get("/check/upstream-demo", headers=bearer(token()))).status_code, 503)
 
+    async def test_evict_makes_the_next_check_read_keycloak_again(self):
+        keycloak = Keycloak()
+        async with client(build(keycloak)) as c:
+            await c.get("/check/upstream-demo", headers=bearer(token()))
+            self.assertEqual((await c.post("/evict/upstream-demo", headers=bearer(token()))).status_code, 204)
+            await c.get("/check/upstream-demo", headers=bearer(token()))
+        self.assertEqual(keycloak.reads, 2)
+
+    async def test_evict_only_affects_the_caller(self):
+        keycloak = Keycloak()
+        async with client(build(keycloak)) as c:
+            await c.get("/check/upstream-demo", headers=bearer(token(sub="user-1")))
+            await c.post("/evict/upstream-demo", headers=bearer(token(sub="user-2")))
+            await c.get("/check/upstream-demo", headers=bearer(token(sub="user-1")))
+        self.assertEqual(keycloak.reads, 1)
+
+    async def test_evict_requires_a_valid_token(self):
+        async with client(build(Keycloak())) as c:
+            self.assertEqual((await c.post("/evict/upstream-demo")).status_code, 401)
+            self.assertEqual((await c.post("/evict/nope", headers=bearer(token()))).status_code, 404)
+
     async def test_concurrent_users_never_share_tokens(self):
         async with client(build(Keycloak())) as c:
             users = [f"user-{n % 2}" for n in range(20)]

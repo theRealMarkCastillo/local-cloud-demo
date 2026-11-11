@@ -84,7 +84,8 @@ def desired(public, secret):
         # Session tokens may call the account API (list/unlink connections) but never read stored tokens.
         "workbench": list(ACCOUNT_ROLES),
     }
-    groups = {"gateway-users": ["llm:use", "workbench:read", "workbench:write", "echo:use", "broker/read-token"],
+    groups = {"gateway-users": ["llm:use", "workbench:read", "workbench:write", "echo:use", "broker/read-token",
+                                *ACCOUNT_ROLES],
               "gateway-jira": ["jira:use"]}
     idp = {"alias": UPSTREAM, "displayName": "Upstream demo", "providerId": "oidc", "enabled": True,
            "storeToken": True, "linkOnly": True, "trustEmail": False, "addReadTokenRoleOnCreate": False,

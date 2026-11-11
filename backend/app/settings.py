@@ -13,6 +13,8 @@ DATABASE_URL = required("DATABASE_URL")
 REDIS_URL = required("REDIS_URL")
 OIDC_ISSUER_URL = os.getenv("OIDC_ISSUER_URL", "").rstrip("/")
 OIDC_INTERNAL_URL = os.getenv("OIDC_INTERNAL_URL", OIDC_ISSUER_URL).rstrip("/")
+# Keycloak account API (linked accounts), called with the user's own token.
+ACCOUNT_URL = OIDC_INTERNAL_URL + "/account"
 OIDC_CLIENT_ID = os.getenv("OIDC_CLIENT_ID", "")
 OIDC_CLIENT_SECRET = os.getenv("OIDC_CLIENT_SECRET", "")
 # MCP resource identifier (RFC 8707/9728). Tokens must name it in `aud`.

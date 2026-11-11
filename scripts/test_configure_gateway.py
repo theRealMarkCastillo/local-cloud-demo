@@ -66,6 +66,11 @@ class DesiredTests(unittest.TestCase):
         self.assertIn("broker/read-token", groups["gateway-users"])
         self.assertEqual(groups["gateway-jira"], ["jira:use"])
 
+    def test_users_group_grants_account_roles_for_connections(self):
+        # Imported users hold no account roles; linking and the account API need these.
+        self.assertLessEqual({"account/manage-account", "account/manage-account-links", "account/view-profile"},
+                             set(desired()["groups"]["gateway-users"]))
+
     def test_idp_urls_follow_public_url(self):
         idp = desired()["idp"]
         config = idp["config"]

@@ -38,6 +38,9 @@ class TokenCache:
         self._items.pop((sub, alias), None)
         return None
 
+    def evict(self, sub: str, alias: str) -> None:
+        self._items.pop((sub, alias), None)
+
     def put(self, sub: str, alias: str, token: str, expires_at: float) -> None:
         until = min(expires_at - SKEW_SECONDS, self._clock() + MAX_TTL_SECONDS)
         if until > self._clock():
@@ -105,15 +108,34 @@ def create_app(verifier=None, broker=None, cache=None, public_url=None) -> FastA
     def health():
         return {"status": "ok"}
 
+    async def caller(request: Request):
+        scheme, _, token = request.headers.get("authorization", "").partition(" ")
+        claims = await state["verifier"].claims(token) if scheme.lower() == "bearer" and token else None
+        return token, claims
+
+    def unauthorized():
+        return JSONResponse({"error": "invalid_token"}, status_code=401, headers={"WWW-Authenticate": "Bearer"})
+
+    @app.post("/evict/{alias}", status_code=204)
+    async def evict(alias: str, request: Request):
+        """Forget the caller's cached token, so a disconnect takes effect at once instead of after the TTL."""
+        if alias not in ALIASES:
+            return JSONResponse({"error": "unknown_service"}, status_code=404)
+        _, claims = await caller(request)
+        if claims is None:
+            return unauthorized()
+        state["cache"].evict(str(claims["sub"]), alias)
+        log.info("credentials sub=%s alias=%s outcome=evicted", claims["sub"], alias)
+        return Response(status_code=204)
+
     @app.api_route("/check/{alias}", methods=METHODS)
     async def check(alias: str, request: Request):
         role = ALIASES.get(alias)
         if role is None:
             return JSONResponse({"error": "unknown_service"}, status_code=404)
-        scheme, _, token = request.headers.get("authorization", "").partition(" ")
-        claims = await state["verifier"].claims(token) if scheme.lower() == "bearer" and token else None
+        token, claims = await caller(request)
         if claims is None:
-            return JSONResponse({"error": "invalid_token"}, status_code=401, headers={"WWW-Authenticate": "Bearer"})
+            return unauthorized()
         sub = str(claims["sub"])
         roles = claims.get("resource_access", {}).get(s.GATEWAY_CLIENT, {}).get("roles", [])
         if role not in roles:
