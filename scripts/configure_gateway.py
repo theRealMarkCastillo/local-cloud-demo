@@ -40,8 +40,14 @@ def audience(name, client_id):
                        "id.token.claim": "false", "introspection.token.claim": "true"}}
 
 
-def agent_mappers():
-    return [audience("gateway-audience", "gateway"), audience("credentials-audience", "gateway-credentials")]
+def agent_mappers(public):
+    # The client-id audiences let `gateway` and `gateway-credentials` exchange the token. The gateway itself
+    # accepts only the resource audience: Keycloak adds client-id audiences to any token carrying that
+    # client's roles, so a full-scope client would otherwise pass as an agent.
+    resource = {"name": "gateway-resource-audience", "protocol": "openid-connect", "protocolMapper": "oidc-audience-mapper",
+                "config": {"included.custom.audience": public + "/gateway", "access.token.claim": "true",
+                           "id.token.claim": "false", "introspection.token.claim": "true"}}
+    return [audience("gateway-audience", "gateway"), audience("credentials-audience", "gateway-credentials"), resource]
 
 
 def confidential(client_id, secret, **extra):
@@ -51,11 +57,11 @@ def confidential(client_id, secret, **extra):
             "attributes": {"standard.token.exchange.enabled": "true"}} | extra
 
 
-def public_agent(client_id, name):
+def public_agent(client_id, name, public):
     return {"clientId": client_id, "name": name, "enabled": True, "protocol": "openid-connect", "publicClient": True,
             "standardFlowEnabled": True, "directAccessGrantsEnabled": False, "implicitFlowEnabled": False,
             "serviceAccountsEnabled": False, "fullScopeAllowed": False, "redirectUris": LOOPBACK, "webOrigins": [],
-            "attributes": {"pkce.code.challenge.method": "S256"}, "protocolMappers": agent_mappers()}
+            "attributes": {"pkce.code.challenge.method": "S256"}, "protocolMappers": agent_mappers(public)}
 
 
 def desired(public, secret):
@@ -63,9 +69,9 @@ def desired(public, secret):
         confidential("gateway", secret["gateway"], name="Outbound gateway"),
         confidential("gateway-credentials", secret["credentials"], name="Gateway credentials service"),
         confidential("workbench-agent", secret["workbench_agent"], name="Workbench in-stack agent",
-                     protocolMappers=agent_mappers()),
-        public_agent("agent-cli", "Sample external agent"),
-        public_agent("agent-cli-writer", "Sample external agent that may write"),
+                     protocolMappers=agent_mappers(public)),
+        public_agent("agent-cli", "Sample external agent", public),
+        public_agent("agent-cli-writer", "Sample external agent that may write", public),
         {"clientId": "workbench", "fullScopeAllowed": False,
          "redirectUris": [public + "/auth/callback", public + "/auth/link-callback"],
          "protocolMappers": [audience("workbench-agent-audience", "workbench-agent")]},

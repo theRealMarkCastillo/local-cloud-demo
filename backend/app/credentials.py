@@ -115,7 +115,7 @@ def create_app(verifier=None, broker=None, cache=None, public_url=None) -> FastA
         if claims is None:
             return JSONResponse({"error": "invalid_token"}, status_code=401, headers={"WWW-Authenticate": "Bearer"})
         sub = str(claims["sub"])
-        roles = claims.get("resource_access", {}).get(s.GATEWAY_AUDIENCE, {}).get("roles", [])
+        roles = claims.get("resource_access", {}).get(s.GATEWAY_CLIENT, {}).get("roles", [])
         if role not in roles:
             log.info("credentials sub=%s alias=%s outcome=forbidden", sub, alias)
             return JSONResponse({"error": "forbidden", "required_role": role}, status_code=403)

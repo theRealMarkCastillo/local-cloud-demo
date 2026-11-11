@@ -75,7 +75,7 @@ def create_app(verifier: UpstreamVerifier | None = None):
         stateless_http=True,
         json_response=True,
         max_request_body_size=65536,
-        transport_security=TransportSecuritySettings(allowed_hosts=["stubs:8000", urlparse(s.PUBLIC_URL).netloc]),
+        transport_security=TransportSecuritySettings(allowed_hosts=["stubs", "stubs:8000", urlparse(s.PUBLIC_URL).netloc]),
     )
 
 

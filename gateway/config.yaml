@@ -1,0 +1,98 @@
+# Outbound gateway (agentgateway). One credential strategy per route; Keycloak roles decide access.
+# Secrets and PUBLIC_URL come from the container environment. The admin UI stays on loopback.
+config:
+  adminAddr: "127.0.0.1:15000"
+frontendPolicies:
+  accessLog:
+    add:
+      jwt.azp: jwt.azp
+binds:
+- port: 3000
+  listeners:
+  - routes:
+    # Our MCP server, on behalf of the user (RFC 8693 token exchange).
+    - name: mcp-workbench
+      matches: [{path: {exact: /gateway/mcp/workbench}}]
+      policies:
+        jwtAuth: &jwt
+          mode: strict
+          issuer: "${PUBLIC_URL}/identity/realms/workbench"
+          # Only registered agent clients map this audience; client-id audiences are not enough.
+          audiences: ["${PUBLIC_URL}/gateway"]
+          jwks: {url: "http://keycloak:8080/identity/realms/workbench/protocol/openid-connect/certs"}
+        authorization:
+          rules: ["'workbench:read' in jwt.resource_access.gateway.roles"]
+        mcpAuthorization:
+          rules:
+          - "mcp.tool.name in ['list_jobs', 'get_report'] && 'workbench:read' in jwt.resource_access.gateway.roles"
+          - "mcp.tool.name == 'submit_job' && 'workbench:write' in jwt.resource_access.gateway.roles"
+      backends:
+      - mcp:
+          targets:
+          - name: workbench
+            mcp: {host: "http://mcp:8000/mcp"}
+        policies:
+          backendAuth:
+            oauthTokenExchange:
+              host: keycloak:8080
+              path: /identity/realms/workbench/protocol/openid-connect/token
+              clientAuth: {clientId: gateway, clientSecret: "${GATEWAY_CLIENT_SECRET}", method: clientSecretBasic}
+              scopes: ["mcp:tools"]
+              # jwtAuth strips the Authorization header after validating it.
+              subjectToken:
+                source: {expression: "jwt.rawToken.unredacted()"}
+    # Per-user SaaS stand-in: the credentials service supplies the user's connected-account token.
+    - name: mcp-jira
+      matches: [{path: {exact: /gateway/mcp/jira}}]
+      policies:
+        jwtAuth: *jwt
+        authorization:
+          rules: ["'jira:use' in jwt.resource_access.gateway.roles"]
+        extAuthz:
+          host: credentials:8000
+          protocol:
+            http:
+              path: '"/check/upstream-demo"'
+              addRequestHeaders:
+                authorization: '"Bearer " + jwt.rawToken.unredacted()'
+              includeResponseHeaders: [authorization]
+          failureMode: {denyWithStatus: 503}
+      backends:
+      - mcp:
+          targets:
+          - name: jira
+            mcp: {host: "http://stubs:8000/jira/mcp"}
+    # Shared system key: the user's token never reaches the service.
+    - name: echo
+      matches: [{path: {pathPrefix: /gateway/echo}}]
+      policies:
+        jwtAuth: *jwt
+        authorization:
+          rules: ["'echo:use' in jwt.resource_access.gateway.roles"]
+        urlRewrite:
+          path: {prefix: /echo}
+      backends:
+      - host: stubs:8000
+        policies:
+          backendAuth:
+            key: "${GATEWAY_ECHO_KEY}"
+    # LLM with the provider key held by the gateway and a per-user token budget.
+    - name: llm
+      matches: [{path: {pathPrefix: /gateway/llm}}]
+      policies:
+        jwtAuth: *jwt
+        authorization:
+          rules: ["'llm:use' in jwt.resource_access.gateway.roles"]
+        urlRewrite:
+          path: {prefix: /}
+        localRateLimit:
+        - {type: tokens, maxTokens: 1000, tokensPerFill: 1000, fillInterval: 1h, key: jwt.sub}
+      backends:
+      - ai:
+          name: stub-llm
+          provider:
+            openAI: {model: fake-model}
+          hostOverride: stubs:8000
+          policies:
+            backendAuth:
+              key: "${GATEWAY_LLM_KEY}"

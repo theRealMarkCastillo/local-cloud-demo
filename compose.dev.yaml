@@ -6,5 +6,11 @@ services:
   mcp:
     volumes: ['./backend/app:/srv/app:ro']
     command: ['uvicorn', 'app.mcp_server:app', '--host', '0.0.0.0', '--port', '8000', '--reload', '--no-proxy-headers', '--no-access-log']
+  credentials:
+    volumes: ['./backend/app:/srv/app:ro']
+    command: ['uvicorn', 'app.credentials:app', '--host', '0.0.0.0', '--port', '8000', '--reload', '--no-proxy-headers', '--no-access-log']
+  stubs:
+    volumes: ['./backend/app:/srv/app:ro']
+    command: ['uvicorn', 'app.stubs:app', '--host', '0.0.0.0', '--port', '8000', '--reload', '--no-proxy-headers', '--no-access-log']
   web:
     volumes: ['./web/public:/usr/share/nginx/html:ro']

@@ -32,6 +32,7 @@ services:
       API_UPSTREAM: api:8000
       IDENTITY_UPSTREAM: keycloak:8080
       MCP_UPSTREAM: mcp:8000
+      GATEWAY_UPSTREAM: gateway:3000
     ports:
       - '127.0.0.1:${WEB_PORT:-8080}:8080'
     depends_on:
@@ -39,6 +40,8 @@ services:
         condition: service_healthy
       mcp:
         condition: service_healthy
+      gateway:
+        condition: service_started
       keycloak:
         condition: service_healthy
     restart: unless-stopped
@@ -82,6 +85,50 @@ services:
       interval: 10s
       timeout: 8s
       retries: 12
+  # Outbound gateway for agents. Internal only: reached through web at /gateway/; no host ports.
+  gateway:
+    image: ghcr.io/agentgateway/agentgateway:v1.7.0
+    command: ['-f', '/config/config.yaml']
+    environment:
+      PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8080}
+      GATEWAY_CLIENT_SECRET: ${GATEWAY_CLIENT_SECRET:-local-only-gateway-secret}
+      GATEWAY_ECHO_KEY: ${GATEWAY_ECHO_KEY:-local-only-echo-key}
+      GATEWAY_LLM_KEY: ${GATEWAY_LLM_KEY:-local-only-llm-key}
+      # Encrypts MCP session IDs (64 hex characters). Local-only default.
+      SESSION_KEY: ${GATEWAY_SESSION_KEY:-6c6f63616c2d6f6e6c792d676174657761792d73657373696f6e2d6b65792121}
+    volumes: ['./gateway/config.yaml:/config/config.yaml:ro']
+    depends_on:
+      keycloak:
+        condition: service_healthy
+      mcp:
+        condition: service_healthy
+      credentials:
+        condition: service_healthy
+      stubs:
+        condition: service_healthy
+    restart: unless-stopped
+  # Hands the gateway each user's stored connected-account token. Internal only.
+  credentials:
+    <<: *app
+    command: ['uvicorn', 'app.credentials:app', '--host', '0.0.0.0', '--port', '8000', '--no-proxy-headers', '--no-access-log']
+    environment:
+      <<: *app-env
+      OIDC_ISSUER_URL: ${PUBLIC_URL:-http://localhost:8080}/identity/realms/workbench
+      OIDC_INTERNAL_URL: http://keycloak:8080/identity/realms/workbench
+      CREDENTIALS_CLIENT_SECRET: ${CREDENTIALS_CLIENT_SECRET:-local-only-credentials-secret}
+    depends_on:
+      keycloak:
+        condition: service_healthy
+    healthcheck: &http-health
+      test: ['CMD', 'python', '-c', 'import urllib.request; urllib.request.urlopen("http://localhost:8000/health", timeout=5)']
+      interval: 10s
+      timeout: 8s
+      retries: 12
+  # Local stand-ins only (fake LLM, echo, Jira-like MCP server). Not part of any cloud definition.
+  stubs:
+    <<: *app
+    command: ['uvicorn', 'app.stubs:app', '--host', '0.0.0.0', '--port', '8000', '--no-proxy-headers', '--no-access-log']
+    healthcheck: *http-health
   worker:
     <<: *app
     command: ['python', '-m', 'app.worker']

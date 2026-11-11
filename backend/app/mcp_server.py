@@ -74,5 +74,6 @@ app = server.streamable_http_app(
     stateless_http=True,
     json_response=True,
     max_request_body_size=65536,
-    transport_security=TransportSecuritySettings(allowed_hosts=[public.netloc], allowed_origins=[s.PUBLIC_URL]),
+    # "mcp" is the Compose-internal name the outbound gateway calls; it is not reachable from a browser.
+    transport_security=TransportSecuritySettings(allowed_hosts=[public.netloc, "mcp", "mcp:8000"], allowed_origins=[s.PUBLIC_URL]),
 )

@@ -154,18 +154,20 @@ def mcp_call(token, method, params, expected=200, origin=None):
 def tool(token, name, arguments):
     return mcp_call(token, "tools/call", {"name": name, "arguments": arguments})
 
-def mcp_token(username, scope="openid mcp:tools"):
+def pkce_token(client_id, username, scope="openid", resource=None):
+    """Authorization-code + PKCE login for a public client; the loopback redirect is captured, never served."""
     verifier = secrets.token_urlsafe(64)
     challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
     state = secrets.token_urlsafe(16)
-    query = urllib.parse.urlencode({"client_id": "workbench-mcp", "response_type": "code", "redirect_uri": MCP_REDIRECT,
-                                    "scope": scope, "state": state, "code_challenge": challenge,
-                                    "code_challenge_method": "S256", "resource": MCP_URL})
+    params = {"client_id": client_id, "response_type": "code", "redirect_uri": MCP_REDIRECT, "scope": scope,
+              "state": state, "code_challenge": challenge, "code_challenge_method": "S256"}
+    if resource:
+        params["resource"] = resource
     opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=TLS), StopAtLoopback(), cookies())
     try:
-        page = opener.open(oidc["authorization_endpoint"] + "?" + query, timeout=20)
+        page = opener.open(oidc["authorization_endpoint"] + "?" + urllib.parse.urlencode(params), timeout=20)
         parser = LoginForm(); parser.feed(page.read().decode())
-        assert parser.action, "MCP login form not found"
+        assert parser.action, f"{client_id} login form not found"
         password = os.getenv("DEMO_PASSWORD", "demo-password")
         data = urllib.parse.urlencode({"username": username, "password": password, "credentialId": ""}).encode()
         opener.open(parser.action, data=data, timeout=20)
@@ -174,10 +176,13 @@ def mcp_token(username, scope="openid mcp:tools"):
         returned = urllib.parse.parse_qs(urllib.parse.urlparse(captured.url).query)
     assert returned.get("state") == [state], "OAuth state mismatch"
     assert "code" in returned, f"No authorization code: {returned.get('error')}"
-    form = urllib.parse.urlencode({"grant_type": "authorization_code", "client_id": "workbench-mcp", "code": returned["code"][0],
+    form = urllib.parse.urlencode({"grant_type": "authorization_code", "client_id": client_id, "code": returned["code"][0],
                                    "redirect_uri": MCP_REDIRECT, "code_verifier": verifier}).encode()
     with urllib.request.urlopen(urllib.request.Request(oidc["token_endpoint"], data=form), timeout=20, context=TLS) as response:
         return json.loads(response.read())["access_token"]
+
+def mcp_token(username, scope="openid mcp:tools"):
+    return pkce_token("workbench-mcp", username, scope, resource=MCP_URL)
 
 status, headers, _ = mcp_raw(None, "tools/list", {})
 assert status == 401, f"Unauthenticated MCP request: expected 401, got {status}"
@@ -227,3 +232,110 @@ try:
 except urllib.error.HTTPError as error:
     assert error.code == 403, f"Anonymous registration: expected 403, got {error.code}"
 print("PASS: anonymous dynamic client registration is rejected")
+
+# --- Outbound gateway: agents act for users; Keycloak roles decide what user ∩ agent may reach ---
+ROOT = Path(__file__).resolve().parents[1]
+GATEWAY = BASE + "/gateway"
+
+def local_env(name, default):
+    return os.getenv(name) or default
+
+def gw(path, token=None, body=None, session=None, method=None):
+    headers = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream",
+               "MCP-Protocol-Version": PROTOCOL}
+    if token:
+        headers["Authorization"] = "Bearer " + token
+    if session:
+        headers["Mcp-Session-Id"] = session
+    data = json.dumps(body).encode() if body is not None else None
+    request = urllib.request.Request(GATEWAY + path, data=data, headers=headers, method=method or ("POST" if data else "GET"))
+    try:
+        response = urllib.request.urlopen(request, timeout=30, context=TLS)
+    except urllib.error.HTTPError as error:
+        response = error
+    raw = response.read().decode()
+    if "text/event-stream" in (response.headers.get("Content-Type") or ""):
+        events = [line[5:].strip() for line in raw.splitlines() if line.startswith("data:")]
+        raw = events[-1] if events else ""
+    try:
+        payload = json.loads(raw) if raw.strip() else None
+    except ValueError:
+        payload = raw
+    return response.status, response.headers, payload
+
+def gw_session(path, token):
+    status, headers, payload = gw(path, token, {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+        "protocolVersion": PROTOCOL, "capabilities": {}, "clientInfo": {"name": "smoke", "version": "1"}}})
+    assert status == 200, f"gateway initialize {path}: {status} {payload}"
+    session = headers.get("Mcp-Session-Id")
+    gw(path, token, {"jsonrpc": "2.0", "method": "notifications/initialized"}, session)
+    return session
+
+def gw_rpc(path, token, session, method, params=None):
+    return gw(path, token, {"jsonrpc": "2.0", "id": 2, "method": method, "params": params or {}}, session)
+
+def gw_tool(path, token, session, name, arguments=None):
+    status, _, payload = gw_rpc(path, token, session, "tools/call", {"name": name, "arguments": arguments or {}})
+    return status, payload
+
+# Token budgets live in gateway memory; start each smoke run with fresh ones.
+subprocess.run(["docker", "compose", "restart", "gateway"], cwd=ROOT, check=True, capture_output=True)
+for attempt in range(30):
+    if gw("/echo/ready")[0] == 401:
+        break
+    time.sleep(1)
+else:
+    raise AssertionError("Gateway did not come back after restart")
+assert gw("/mcp/workbench", None, {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}})[0] == 401
+assert gw("/echo/x", demo_token)[0] == 401, "A token minted for /mcp must not open the gateway"
+mcp_claims = json.loads(base64.urlsafe_b64decode(demo_token.split(".")[1] + "=="))
+assert "resource_access" not in mcp_claims, "MCP tokens must not carry roles"
+print("PASS: gateway rejects missing and wrong-audience tokens")
+WB = "/mcp/workbench"
+agent_demo = pkce_token("agent-cli", "demo")
+agent_other = pkce_token("agent-cli", "demo-other")
+writer_demo = pkce_token("agent-cli-writer", "demo")
+demo_session = gw_session(WB, agent_demo)
+status, _, listed = gw_rpc(WB, agent_demo, demo_session, "tools/list")
+assert status == 200 and {t["name"] for t in listed["result"]["tools"]} == {"list_jobs", "get_report"}, listed
+status, denied = gw_tool(WB, agent_demo, demo_session, "submit_job", {"title": "blocked", "text": "x"})
+assert status != 200 or "error" in denied or denied["result"].get("isError"), f"agent-cli must not submit jobs: {denied}"
+writer_session = gw_session(WB, writer_demo)
+status, written = gw_tool(WB, writer_demo, writer_session, "submit_job", {"title": "Gateway smoke", "text": "through the gateway"})
+assert status == 200 and not written["result"].get("isError"), written
+gateway_job = written["result"]["structuredContent"]["id"]
+status, _, _ = gw("/mcp/jira", agent_other, {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}})
+assert status == 403, f"demo-other lacks jira:use even through an agent that has it: {status}"
+print("PASS: gateway governance is user ∩ agent")
+status, mine = gw_tool(WB, agent_demo, demo_session, "list_jobs")
+demo_ids = {item["id"] for item in mine["result"]["structuredContent"]["jobs"]}
+other_session = gw_session(WB, agent_other)
+status, theirs = gw_tool(WB, agent_other, other_session, "list_jobs")
+other_ids = {item["id"] for item in theirs["result"]["structuredContent"]["jobs"]}
+assert {mcp_job, gateway_job} <= demo_ids and not demo_ids & other_ids, "OBO through the gateway must stay owner-scoped"
+print("PASS: OBO through the gateway stays owner-scoped")
+status, _, echoed = gw("/echo/x", agent_demo)
+assert status == 200 and echoed["headers"].get("authorization") == "Bearer " + local_env("GATEWAY_ECHO_KEY", "local-only-echo-key"), echoed
+assert agent_demo not in json.dumps(echoed), "The user's token must not reach a shared-key service"
+print("PASS: shared-key route hides the user token")
+chat = {"model": "fake-model", "messages": [{"role": "user", "content": "hi"}]}
+codes = [gw("/llm/v1/chat/completions", agent_demo, chat)[0] for _ in range(3)]
+assert codes == [200, 200, 429], f"demo's 1000-token budget at 500 per call: {codes}"
+status, _, reply = gw("/llm/v1/chat/completions", agent_other, chat)
+# The stub echoes the first 15 characters of the Authorization header it received: the provider key, not a user token.
+provider_prefix = ("Bearer " + local_env("GATEWAY_LLM_KEY", "local-only-llm-key"))[:15]
+assert status == 200 and reply["choices"][0]["message"]["content"].endswith("auth=" + provider_prefix), reply
+print("PASS: LLM budget is per user")
+composed = json.loads(subprocess.run(["docker", "compose", "config", "--format", "json"], cwd=ROOT, check=True,
+                                     capture_output=True, text=True).stdout)["services"]
+for name in ("gateway", "credentials", "stubs"):
+    assert not composed[name].get("ports"), f"{name} must not publish host ports"
+for port in (15000, 3000):
+    try:
+        urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=3)
+        raise AssertionError(f"Port {port} is reachable from the host")
+    except urllib.error.HTTPError:
+        raise AssertionError(f"Port {port} is reachable from the host")
+    except (urllib.error.URLError, OSError):
+        pass
+print("PASS: gateway internals are not reachable from the host")

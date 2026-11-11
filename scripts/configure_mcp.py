@@ -28,6 +28,8 @@ def main():
     client = {"clientId": CLIENT, "name": "Workbench MCP clients", "enabled": True, "protocol": "openid-connect",
               "publicClient": True, "standardFlowEnabled": True, "directAccessGrantsEnabled": False,
               "implicitFlowEnabled": False, "serviceAccountsEnabled": False,
+              # MCP tokens carry no roles: full scope would add every role the user holds, and their audiences.
+              "fullScopeAllowed": False,
               "redirectUris": ["http://127.0.0.1/*", "http://localhost/*"], "webOrigins": [],
               "attributes": {"pkce.code.challenge.method": "S256"}}
     created = []

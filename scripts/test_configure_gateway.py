@@ -38,6 +38,14 @@ class DesiredTests(unittest.TestCase):
             audiences = {m["config"].get("included.client.audience") for m in client(state, name)["protocolMappers"]}
             self.assertLessEqual({"gateway", "gateway-credentials"}, audiences, name)
 
+    def test_only_agent_clients_name_the_gateway_resource(self):
+        # Keycloak adds client-id audiences to any token that carries that client's roles, so the
+        # gateway accepts only this explicit resource audience, which just the agent clients map.
+        state = desired()
+        holders = sorted(c["clientId"] for c in state["clients"] for m in c.get("protocolMappers", [])
+                         if m["config"].get("included.custom.audience") == PUBLIC + "/gateway")
+        self.assertEqual(holders, ["agent-cli", "agent-cli-writer", "workbench-agent"])
+
     def test_workbench_client_adds_workbench_agent_audience(self):
         audiences = {m["config"].get("included.client.audience") for m in client(desired(), "workbench")["protocolMappers"]}
         self.assertIn("workbench-agent", audiences)
